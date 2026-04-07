@@ -1,15 +1,12 @@
-# Workspace members
-# Note: src-tauri will be added in Task 4 (Initialize Tauri project)
-# This is expected for a multi-phase implementation
-[workspace]
-members = ["src-tauri"]
-
-[workspace.package]
+[package]
+name = "auralis"
 version = "0.1.0"
 edition = "2021"
 authors = ["Sentia Lab"]
 
-[workspace.dependencies]
+[dependencies]
+# Workspace dependencies - defined locally for now
+# In future tasks, these will be managed via workspace
 tokio = { version = "1.40", features = ["full"] }
 async-trait = "0.1"
 thiserror = "2.0"
@@ -19,3 +16,6 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
