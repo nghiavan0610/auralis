@@ -13,10 +13,11 @@ use cpal::{
     Device, StreamConfig,
 };
 use futures::stream;
+use serde::{Serialize, Deserialize};
 use std::sync::{Arc, Mutex};
 
 /// Configuration for audio capture
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioCaptureConfig {
     /// Sample rate in Hz (e.g., 16000, 44100, 48000)
     pub sample_rate: u32,
@@ -57,6 +58,12 @@ pub struct MicrophoneCapture {
     is_active: bool,
     is_recording: Arc<Mutex<bool>>,
     audio_data: Arc<Mutex<Vec<Vec<f32>>>>,
+    /// The actual sample rate the device uses (may differ from requested)
+    actual_sample_rate: u32,
+    /// The actual channel count the device uses (may differ from requested)
+    actual_channels: u16,
+    /// Flag to signal the stream thread to stop
+    stream_stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl MicrophoneCapture {
@@ -64,21 +71,23 @@ impl MicrophoneCapture {
     pub fn new(config: AudioCaptureConfig) -> Result<Self, AudioError> {
         // Validate configuration
         if config.sample_rate == 0 {
-            return Err(AudioError::ConfigError(
-                "Sample rate must be greater than 0".to_string(),
-            ));
+            return Err(AudioError::ConfigurationError {
+                message: "Sample rate must be greater than 0".to_string(),
+            });
         }
         if config.channels == 0 {
-            return Err(AudioError::ConfigError(
-                "Channels must be greater than 0".to_string(),
-            ));
+            return Err(AudioError::ConfigurationError {
+                message: "Channels must be greater than 0".to_string(),
+            });
         }
         if config.chunk_duration_ms == 0 {
-            return Err(AudioError::ConfigError(
-                "Chunk duration must be greater than 0".to_string(),
-            ));
+            return Err(AudioError::ConfigurationError {
+                message: "Chunk duration must be greater than 0".to_string(),
+            });
         }
 
+        let actual_sample_rate = config.sample_rate;
+        let actual_channels = config.channels;
         let audio_config = AudioConfig::from(config.clone());
 
         Ok(Self {
@@ -87,6 +96,9 @@ impl MicrophoneCapture {
             is_active: false,
             is_recording: Arc::new(Mutex::new(false)),
             audio_data: Arc::new(Mutex::new(Vec::new())),
+            actual_sample_rate,
+            actual_channels,
+            stream_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
@@ -99,7 +111,24 @@ impl MicrophoneCapture {
     fn get_default_device() -> Result<Device, AudioError> {
         let host = cpal::default_host();
         host.default_input_device()
-            .ok_or_else(|| AudioError::DeviceError("No audio input device found".to_string()))
+            .ok_or_else(|| AudioError::DeviceOpenError {
+                device: "default".to_string(),
+            })
+    }
+
+    /// Get a shared reference to the internal audio data buffer
+    pub fn audio_data(&self) -> Arc<Mutex<Vec<Vec<f32>>>> {
+        self.audio_data.clone()
+    }
+
+    /// Get a shared reference to the recording flag
+    pub fn is_recording_flag(&self) -> Arc<Mutex<bool>> {
+        self.is_recording.clone()
+    }
+
+    /// Get a shared reference to the stream stop flag
+    pub fn stream_stop_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.stream_stop.clone()
     }
 
     /// Get available audio input devices
@@ -107,7 +136,7 @@ impl MicrophoneCapture {
         let host = cpal::default_host();
         let devices = host
             .devices()
-            .map_err(|e| AudioError::DeviceError(format!("Failed to get devices: {}", e)))?;
+            .map_err(|e| AudioError::InitializationError(format!("Failed to get devices: {}", e)))?;
 
         let device_names: Vec<String> = devices
             .filter_map(|d| d.name().ok())
@@ -121,57 +150,108 @@ impl MicrophoneCapture {
 impl AudioSource for MicrophoneCapture {
     async fn start(&mut self) -> Result<(), AudioError> {
         if self.is_active {
-            return Err(AudioError::ConfigError("Audio capture already active".to_string()));
+            return Err(AudioError::InitializationError("Audio capture already active".to_string()));
         }
 
         let device = Self::get_default_device()?;
 
-        // Create a supported stream configuration
-        let supported = device
+        // Collect supported configs into a Vec so we can search multiple times
+        let supported_configs: Vec<_> = device
             .supported_input_configs()
-            .map_err(|e| AudioError::DeviceError(format!("Failed to get supported configs: {}", e)))?
-            .find(|config| {
-                config.min_sample_rate().0 <= self.config.sample_rate
-                    && config.max_sample_rate().0 >= self.config.sample_rate
-                    && config.channels() == self.config.channels
-            })
-            .ok_or_else(|| {
-                AudioError::ConfigError(format!(
-                    "No supported config found for sample_rate={}, channels={}",
-                    self.config.sample_rate, self.config.channels
-                ))
-            })?;
+            .map_err(|e| AudioError::ConfigurationError {
+                message: format!("Failed to get supported configs: {}", e),
+            })?
+            .collect();
 
-        let stream_config: StreamConfig = supported.with_sample_rate(self.config.sample_rate).into();
+        // Try exact match first (16kHz mono)
+        let exact_match = supported_configs.iter().find(|config| {
+            config.min_sample_rate().0 <= self.config.sample_rate
+                && config.max_sample_rate().0 >= self.config.sample_rate
+                && config.channels() == self.config.channels
+        });
+
+        let stream_config: StreamConfig = if let Some(supported) = exact_match {
+            self.actual_sample_rate = self.config.sample_rate;
+            self.actual_channels = self.config.channels;
+            supported.with_sample_rate(cpal::SampleRate(self.config.sample_rate)).into()
+        } else {
+            // Fall back to device default config
+            let default_config = device
+                .default_input_config()
+                .map_err(|e| AudioError::ConfigurationError {
+                    message: format!("Failed to get default input config: {}", e),
+                })?;
+
+            self.actual_sample_rate = default_config.sample_rate().0;
+            self.actual_channels = default_config.channels();
+
+            tracing::info!(
+                "Using device native format: {}Hz, {}ch (will resample to {}Hz {}ch for processing)",
+                self.actual_sample_rate, self.actual_channels,
+                self.config.sample_rate, self.config.channels
+            );
+
+            default_config.into()
+        };
 
         // Setup recording flag and audio data storage
         let is_recording = self.is_recording.clone();
+        let is_recording_for_closure = is_recording.clone();
         let audio_data = self.audio_data.clone();
-        let channels = self.config.channels;
+        let actual_sample_rate = self.actual_sample_rate;
+        let actual_channels = self.actual_channels;
+        let target_sample_rate = self.config.sample_rate;
 
         // Clear any existing audio data
         if let Ok(mut data) = audio_data.lock() {
             data.clear();
         }
 
-        // Build the audio stream
-        let stream = device
-            .build_input_stream(
+        // Build the audio stream - cpal::Stream is !Send so we must create it
+        // and keep it alive entirely within a dedicated non-async thread.
+        self.stream_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let stop_flag = self.stream_stop.clone();
+        let started_ok = Arc::new(std::sync::Mutex::new(false));
+        let started_ok_clone = started_ok.clone();
+        let start_err = Arc::new(std::sync::Mutex::new(None::<String>));
+        let start_err_clone = start_err.clone();
+
+        std::thread::spawn(move || {
+            let stream = match device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    // Only process audio if we're recording
-                    if let Ok(recording) = is_recording.lock() {
+                    if let Ok(recording) = is_recording_for_closure.lock() {
                         if *recording {
-                            // Convert interleaved data to planar if needed
-                            let chunk: Vec<f32> = if channels == 2 {
-                                // For stereo, just take the left channel for now
-                                data.iter().step_by(2).copied().collect()
+                            let mono: Vec<f32> = if actual_channels > 1 {
+                                data.iter().step_by(actual_channels as usize).copied().collect()
                             } else {
                                 data.to_vec()
                             };
 
+                            let resampled: Vec<f32> = if actual_sample_rate != target_sample_rate {
+                                let ratio = target_sample_rate as f64 / actual_sample_rate as f64;
+                                let new_len = (mono.len() as f64 * ratio) as usize;
+                                let mut output = Vec::with_capacity(new_len);
+                                for i in 0..new_len {
+                                    let src_idx = i as f64 / ratio;
+                                    let idx = src_idx as usize;
+                                    if idx + 1 < mono.len() {
+                                        let frac = src_idx - idx as f64;
+                                        output.push(
+                                            (mono[idx] as f64 * (1.0 - frac)
+                                                + mono[idx + 1] as f64 * frac) as f32,
+                                        );
+                                    } else if idx < mono.len() {
+                                        output.push(mono[idx]);
+                                    }
+                                }
+                                output
+                            } else {
+                                mono
+                            };
+
                             if let Ok(mut buffer) = audio_data.lock() {
-                                buffer.push(chunk);
+                                buffer.push(resampled);
                             }
                         }
                     }
@@ -179,14 +259,35 @@ impl AudioSource for MicrophoneCapture {
                 |err| {
                     eprintln!("Audio capture error: {:?}", err);
                 },
-                None, // Default buffer size
-            )
-            .map_err(|e| AudioError::DeviceError(format!("Failed to build input stream: {}", e)))?;
+                None,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    *start_err_clone.lock().unwrap() = Some(format!("Failed to build input stream: {}", e));
+                    return;
+                }
+            };
 
-        // Start the stream
-        stream
-            .play()
-            .map_err(|e| AudioError::DeviceError(format!("Failed to start stream: {}", e)))?;
+            if let Err(e) = stream.play() {
+                *start_err_clone.lock().unwrap() = Some(format!("Failed to start stream: {}", e));
+                return;
+            }
+
+            *started_ok_clone.lock().unwrap() = true;
+
+            // Keep stream alive until stop signal
+            while stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            // Stream dropped here
+        });
+
+        // Wait for the stream thread to start (or fail)
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        if let Some(err) = start_err.lock().unwrap().take() {
+            return Err(AudioError::InitializationError(err));
+        }
 
         // Set recording flag to true
         if let Ok(mut recording) = is_recording.lock() {
@@ -200,7 +301,7 @@ impl AudioSource for MicrophoneCapture {
 
     async fn stop(&mut self) -> Result<(), AudioError> {
         if !self.is_active {
-            return Err(AudioError::ConfigError("Audio capture not active".to_string()));
+            return Err(AudioError::InitializationError("Audio capture not active".to_string()));
         }
 
         // Stop recording
@@ -208,6 +309,10 @@ impl AudioSource for MicrophoneCapture {
             *recording = false;
         }
 
+        // Signal the stream thread to stop (drops the cpal stream)
+        self.stream_stop.store(false, std::sync::atomic::Ordering::Relaxed);
+        // Give it a moment to clean up
+        std::thread::sleep(std::time::Duration::from_millis(200));
         self.is_active = false;
 
         Ok(())
@@ -215,39 +320,60 @@ impl AudioSource for MicrophoneCapture {
 
     fn stream(&self) -> Result<AudioStream, AudioError> {
         if !self.is_active {
-            return Err(AudioError::ConfigError("Audio capture not active".to_string()));
+            return Err(AudioError::InitializationError("Audio capture not active".to_string()));
         }
 
         let audio_data = self.audio_data.clone();
         let chunk_size = self.audio_config.buffer_size;
 
-        let stream = stream::repeat_with(move || {
-            if let Ok(mut data) = audio_data.lock() {
-                if data.is_empty() {
-                    // Return silence if no data available yet
-                    return Ok(vec![0.0f32; chunk_size]);
+        // Use an interval-based stream that yields every 50ms to match
+        // the audio capture rate, avoiding a busy-loop that starves the
+        // mic callback from writing to the shared buffer.
+        let stream = stream::unfold(0u64, move |_count| {
+            let audio_data = audio_data.clone();
+            async move {
+                // Sleep ~50ms to match the audio chunk cadence
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                let result = if let Ok(mut data) = audio_data.lock() {
+                    if data.is_empty() {
+                        // No data yet - return None to skip this tick
+                        None
+                    } else {
+                        // Collect all available chunks into one buffer
+                        let mut combined: Vec<f32> = Vec::new();
+                        while !data.is_empty() && combined.len() < chunk_size * 2 {
+                            let chunk = data.remove(0);
+                            combined.extend(chunk);
+                        }
+
+                        if combined.is_empty() {
+                            None
+                        } else if combined.len() < chunk_size {
+                            combined.resize(chunk_size, 0.0);
+                            Some(Ok(combined))
+                        } else if combined.len() > chunk_size {
+                            let (first, rest) = combined.split_at(chunk_size);
+                            if !rest.is_empty() {
+                                data.insert(0, rest.to_vec());
+                            }
+                            Some(Ok(first.to_vec()))
+                        } else {
+                            Some(Ok(combined))
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                // Return Some((item, next_state)) to continue, or stop if no data
+                match result {
+                    Some(item) => Some((item, 0)),
+                    None => {
+                        // Return silence to keep the stream alive
+                        Some((Ok(vec![0.0f32; chunk_size]), 0))
+                    }
                 }
-
-                // Get the first chunk
-                let chunk = data.remove(0);
-
-                // If chunk is smaller than expected, pad with zeros
-                if chunk.len() < chunk_size {
-                    let mut padded = chunk;
-                    padded.resize(chunk_size, 0.0);
-                    return Ok(padded);
-                }
-
-                // If chunk is larger than expected, split it
-                if chunk.len() > chunk_size {
-                    let (first, rest) = chunk.split_at(chunk_size);
-                    data.insert(0, rest.to_vec());
-                    return Ok(first.to_vec());
-                }
-
-                Ok(chunk)
-            } else {
-                Ok(vec![0.0f32; chunk_size])
             }
         });
 

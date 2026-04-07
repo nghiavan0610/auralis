@@ -19,14 +19,22 @@
     error?: string;
   }
 
-  let modelStatus: ModelStatus | null = null;
-  let downloadProgress: ModelDownloadProgress[] = [
-    { model: 'Whisper', progress: 0, status: 'idle' },
-    { model: 'MADLAD', progress: 0, status: 'idle' },
-    { model: 'Silero', progress: 0, status: 'idle' },
-  ];
+  interface DownloadProgress {
+    model: string;
+    downloaded_bytes: number;
+    total_bytes: number;
+    progress_percent: number;
+    status: string;
+    error?: string;
+  }
 
-  let isDownloading = false;
+  let modelStatus = $state<ModelStatus | null>(null);
+  let downloadProgress = $state<ModelDownloadProgress[]>([
+    { model: 'Whisper', progress: 0, status: 'idle' },
+    { model: 'NLLB', progress: 0, status: 'idle' },
+    { model: 'Silero', progress: 0, status: 'idle' },
+  ]);
+  let isDownloading = $state(false);
 
   onMount(async () => {
     await refreshModelStatus();
@@ -43,26 +51,13 @@
 
   function updateDownloadProgressFromStatus() {
     if (!modelStatus) return;
-
     downloadProgress = downloadProgress.map((item) => {
       if (item.model === 'Whisper') {
-        return {
-          ...item,
-          status: modelStatus!.stt_available ? 'completed' : 'idle',
-          progress: modelStatus!.stt_available ? 100 : 0,
-        };
-      } else if (item.model === 'MADLAD') {
-        return {
-          ...item,
-          status: modelStatus!.translation_available ? 'completed' : 'idle',
-          progress: modelStatus!.translation_available ? 100 : 0,
-        };
+        return { ...item, status: modelStatus!.stt_available ? 'completed' : 'idle', progress: modelStatus!.stt_available ? 100 : 0 };
+      } else if (item.model === 'NLLB') {
+        return { ...item, status: modelStatus!.translation_available ? 'completed' : 'idle', progress: modelStatus!.translation_available ? 100 : 0 };
       } else if (item.model === 'Silero') {
-        return {
-          ...item,
-          status: modelStatus!.vad_available ? 'completed' : 'idle',
-          progress: modelStatus!.vad_available ? 100 : 0,
-        };
+        return { ...item, status: modelStatus!.vad_available ? 'completed' : 'idle', progress: modelStatus!.vad_available ? 100 : 0 };
       }
       return item;
     });
@@ -71,43 +66,55 @@
   async function downloadModel(modelName: string) {
     try {
       isDownloading = true;
-
-      // Update status to downloading
       downloadProgress = downloadProgress.map((item) =>
         item.model === modelName ? { ...item, status: 'downloading' as const, progress: 0 } : item
       );
 
-      // Simulate download progress (in real implementation, this would be from Tauri events)
-      const interval = setInterval(() => {
+      const modelType = modelName.toLowerCase() === 'whisper' ? 'whisper'
+        : modelName === 'NLLB' ? 'nllb'
+        : 'silero';
+
+      const { listen } = await import('@tauri-apps/api/event');
+      const unlisten = await listen<DownloadProgress>('download-progress', (event) => {
+        if (event.payload.model !== modelType) return;
+
         downloadProgress = downloadProgress.map((item) => {
-          if (item.model === modelName && item.status === 'downloading') {
-            const newProgress = Math.min(item.progress + 10, 100);
-            if (newProgress >= 100) {
-              clearInterval(interval);
-              return { ...item, progress: 100, status: 'completed' as const };
+          if (item.model === modelName) {
+            if (event.payload.status === 'error') {
+              return { ...item, status: 'error' as const, progress: 0, error: event.payload.error };
+            } else if (event.payload.status === 'completed') {
+              return { ...item, status: 'completed' as const, progress: 100 };
+            } else {
+              return { ...item, status: 'downloading' as const, progress: event.payload.progress_percent };
             }
-            return { ...item, progress: newProgress };
           }
           return item;
         });
-      }, 500);
 
-      // In a real implementation, you would call a Tauri command to download the model
-      // and listen to progress events
-      // await invoke('download_model', { modelName });
+        if (event.payload.status === 'completed' || event.payload.status === 'error') {
+          unlisten();
+          isDownloading = false;
+          refreshModelStatus();
+        }
+      });
 
-      // Refresh model status after "download" completes
-      setTimeout(async () => {
-        clearInterval(interval);
-        await refreshModelStatus();
+      const result = await invoke<string>('download_model', { modelType });
+      if (result.includes('already downloaded')) {
+        unlisten();
+        downloadProgress = downloadProgress.map((item) =>
+          item.model === modelName ? { ...item, status: 'completed' as const, progress: 100 } : item
+        );
         isDownloading = false;
-      }, 5500);
-
+        refreshModelStatus();
+      }
     } catch (error) {
+      const errorMsg = String(error);
       downloadProgress = downloadProgress.map((item) =>
-        item.model === modelName
-          ? { ...item, status: 'error' as const, error: String(error) }
-          : item
+        item.model === modelName ? {
+          ...item,
+          status: 'error' as const,
+          error: errorMsg
+        } : item
       );
       isDownloading = false;
     }
@@ -115,27 +122,19 @@
 
   function getStatusIcon(status: string) {
     switch (status) {
-      case 'completed':
-        return '✓';
-      case 'downloading':
-        return '⏳';
-      case 'error':
-        return '✗';
-      default:
-        return '○';
+      case 'completed': return '✓';
+      case 'downloading': return '⏳';
+      case 'error': return '✗';
+      default: return '○';
     }
   }
 
   function getStatusClass(status: string) {
     switch (status) {
-      case 'completed':
-        return 'status-success';
-      case 'downloading':
-        return 'status-downloading';
-      case 'error':
-        return 'status-error';
-      default:
-        return 'status-idle';
+      case 'completed': return 'status-success';
+      case 'downloading': return 'status-downloading';
+      case 'error': return 'status-error';
+      default: return 'status-idle';
     }
   }
 </script>
@@ -166,8 +165,8 @@
           <div class="model-description">
             {#if item.model === 'Whisper'}
               Speech-to-text engine for transcription
-            {:else if item.model === 'MADLAD'}
-              Neural machine translation model
+            {:else if item.model === 'NLLB'}
+              NLLB-200 neural machine translation (~1.25 GB)
             {:else if item.model === 'Silero'}
               Voice activity detection model
             {/if}
@@ -180,16 +179,16 @@
         <div class="model-actions">
           {#if item.status === 'idle' || item.status === 'error'}
             <button
-              on:click={() => downloadModel(item.model)}
+              onclick={() => downloadModel(item.model)}
               disabled={isDownloading}
-              class:download-btn={true}
+              class="download-btn"
             >
               Download
             </button>
           {:else if item.status === 'downloading'}
             <div class="progress-info">{item.progress}%</div>
           {:else if item.status === 'completed'}
-            <div class="status-success">Ready</div>
+            <div class="status-success-text">Ready</div>
           {/if}
         </div>
 
@@ -204,14 +203,14 @@
     {/each}
   </div>
 
-  <div class="model-info">
+  <div class="model-info-note">
     <p><strong>Note:</strong> Models are required for real-time translation. Download sizes:</p>
     <ul>
       <li>Whisper: ~1.5 GB</li>
-      <li>MADLAD: ~2.8 GB</li>
+      <li>NLLB: ~1.25 GB</li>
       <li>Silero: ~65 MB</li>
     </ul>
-    <p><strong>Total:</strong> ~4.4 GB</p>
+    <p><strong>Total:</strong> ~2.8 GB</p>
   </div>
 </div>
 
@@ -256,16 +255,6 @@
     height: 8px;
     border-radius: 50%;
     background-color: currentColor;
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
   }
 
   .models-list {
@@ -299,21 +288,10 @@
     text-align: center;
   }
 
-  .model-icon.status-success {
-    color: #4caf50;
-  }
-
-  .model-icon.status-error {
-    color: #f44336;
-  }
-
-  .model-icon.status-downloading {
-    color: #ff9800;
-  }
-
-  .model-icon.status-idle {
-    color: rgba(255, 255, 255, 0.4);
-  }
+  .model-icon.status-success { color: #4caf50; }
+  .model-icon.status-error { color: #f44336; }
+  .model-icon.status-downloading { color: #ff9800; }
+  .model-icon.status-idle { color: rgba(255, 255, 255, 0.4); }
 
   .model-name {
     font-weight: 600;
@@ -345,14 +323,12 @@
     color: #ff9800;
   }
 
-  .status-success {
+  .status-success-text {
     color: #4caf50;
     font-weight: 500;
   }
 
-  .progress-bar-container {
-    margin-top: 1rem;
-  }
+  .progress-bar-container { margin-top: 1rem; }
 
   .progress-bar {
     width: 100%;
@@ -390,7 +366,7 @@
     cursor: not-allowed;
   }
 
-  .model-info {
+  .model-info-note {
     margin-top: 1.5rem;
     padding: 1rem;
     background-color: rgba(255, 255, 255, 0.02);
@@ -399,16 +375,7 @@
     color: rgba(255, 255, 255, 0.7);
   }
 
-  .model-info p {
-    margin-bottom: 0.5rem;
-  }
-
-  .model-info ul {
-    margin-left: 1.5rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .model-info li {
-    margin-bottom: 0.25rem;
-  }
+  .model-info-note p { margin-bottom: 0.5rem; }
+  .model-info-note ul { margin-left: 1.5rem; margin-bottom: 0.5rem; }
+  .model-info-note li { margin-bottom: 0.25rem; }
 </style>

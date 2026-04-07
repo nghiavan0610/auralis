@@ -1,202 +1,182 @@
 //! Tauri commands for the Auralis application
 //!
 //! This module provides the command handlers for the frontend to interact with
-//! the Rust backend.
+//! the Rust backend. Old orchestrator-based commands have been removed in favour
+//! of the dual-mode architecture (cloud via Soniox / offline via Python sidecar).
 
-use crate::state::{AuralisState, ModelStatus};
-use auralis::application::{AuralisEvent, EventBus};
-use auralis::infrastructure::*;
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use crate::state::ModelStatus;
+use tauri::{AppHandle, Emitter};
 
-/// Start the translation process
+/// Greet command (basic connectivity test)
 #[tauri::command]
-async fn start_translation(
-    state: State<'_, AuralisState>,
+pub fn greet(name: &str) -> String {
+    format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Get the current model status by checking the filesystem
+#[tauri::command]
+pub async fn get_model_status() -> Result<ModelStatus, String> {
+    use auralis::infrastructure::model_path;
+
+    let config = model_path::ModelPathConfig::default();
+    let resolution = model_path::resolve_model_paths(&config);
+
+    Ok(ModelStatus {
+        stt_available: resolution.found_models.whisper,
+        stt_model: "Whisper".to_string(),
+        translation_available: resolution.found_models.nllb,
+        translation_model: "NLLB".to_string(),
+        vad_available: resolution.found_models.silero,
+        vad_model: "Silero".to_string(),
+        system_ready: resolution.has_all_models(),
+    })
+}
+
+/// Check if a specific model exists at the configured path
+#[tauri::command]
+pub fn check_model_exists(model_type: String) -> Result<bool, String> {
+    use auralis::infrastructure::model_path;
+
+    let config = model_path::ModelPathConfig::default();
+    let resolution = model_path::resolve_model_paths(&config);
+
+    let exists = match model_type.as_str() {
+        "whisper" | "stt" => resolution.found_models.whisper,
+        "nllb" | "madlad" | "translation" => resolution.found_models.nllb,
+        "silero" | "vad" => resolution.found_models.silero,
+        _ => return Err(format!("Unknown model type: {}", model_type)),
+    };
+
+    Ok(exists)
+}
+
+/// Download a specific model
+#[tauri::command]
+pub async fn download_model(
     app_handle: AppHandle,
+    model_type: String,
 ) -> Result<String, String> {
-    // Check if already running
-    if state.is_translating().await {
-        return Err("Translation is already running".to_string());
+    use crate::model_downloader;
+
+    // Validate model type
+    let valid_types = model_downloader::ModelRegistry::all_models();
+    if !valid_types.contains(&model_type.as_str()) {
+        return Err(format!(
+            "Unknown model type: {}. Valid types: {:?}",
+            model_type, valid_types
+        ));
     }
 
-    // Get current languages
-    let source_lang = state.source_language().await;
-    let target_lang = state.target_language().await;
+    // Check if already downloaded
+    let models_dir = model_downloader::ensure_models_dir().await?;
 
-    // Create audio capture
-    let audio_config = AudioCaptureConfig {
-        sample_rate: 16000,
-        channels: 1,
-        buffer_size: 4096,
-        device_name: None,
+    // For nllb, check if the main model.bin file exists
+    let already_exists = if model_type == "nllb" {
+        models_dir.join("nllb").join("model.bin").exists()
+    } else {
+        let (_, filename) = model_downloader::ModelRegistry::get_model_info(&model_type)?;
+        let target_path = models_dir.join(filename);
+        target_path.exists() && std::fs::metadata(&target_path).map(|m| m.len() > 0).unwrap_or(false)
     };
-    let audio_source = MicrophoneCapture::new(audio_config)
-        .map_err(|e| format!("Failed to create audio source: {}", e))?;
 
-    // Create STT engine
-    let stt_config = WhisperConfig {
-        model_path: "models/whisper.bin".to_string(),
-        language: Some(source_lang.clone()),
-        ..Default::default()
-    };
-    let mut stt_engine = WhisperEngine::new(stt_config);
-    stt_engine.initialize(serde_json::json!({}))
-        .await
-        .map_err(|e| format!("Failed to initialize STT: {}", e))?;
+    if already_exists {
+        // Emit completion event so frontend can update UI
+        let _ = app_handle.emit("download-progress", model_downloader::DownloadProgress {
+            model: model_type.clone(),
+            downloaded_bytes: 0,
+            total_bytes: 0,
+            progress_percent: 100,
+            status: "completed".to_string(),
+            error: None,
+        });
+        return Ok(format!("Model {} already downloaded", model_type));
+    }
 
-    // Create translator
-    let translator_config = MadladConfig {
-        model_path: "models/madlad".to_string(),
-        device: "cuda".to_string(),
-    };
-    let mut translator = MadladTranslator::new(translator_config);
-    translator.initialize(serde_json::json!({}))
-        .await
-        .map_err(|e| format!("Failed to initialize translator: {}", e))?;
-
-    // Create VAD
-    let vad_config = SileroConfig {
-        model_path: "models/silero_vad.torch".to_string(),
-        threshold: 0.5,
-        sample_rate: 16000,
-    };
-    let mut vad = SileroVAD::new(vad_config);
-    vad.initialize(serde_json::json!({}))
-        .await
-        .map_err(|e| format!("Failed to initialize VAD: {}", e))?;
-
-    // Create orchestrator
-    let mut orchestrator = auralis::Orchestrator::new(
-        audio_source,
-        stt_engine,
-        translator,
-        vad,
-        source_lang.clone(),
-        target_lang.clone(),
-    );
-
-    // Subscribe to events and emit to frontend
-    let event_bus = orchestrator.event_bus();
-    let mut receiver = event_bus.subscribe();
-
+    // Spawn download in background
+    let model_type_clone = model_type.clone();
     tokio::spawn(async move {
-        while let Ok(event) = receiver.recv().await {
-            // Emit event to frontend
-            let event_name = match event {
-                AuralisEvent::STTResult { .. } => "stt-result",
-                AuralisEvent::TranslationResult { .. } => "translation-result",
-                AuralisEvent::Error { .. } => "error",
-                AuralisEvent::SpeechActivityChanged { .. } => "speech-activity",
-                AuralisEvent::AudioCaptureChanged { .. } => "audio-capture",
-                AuralisEvent::StatusUpdate { .. } => "status-update",
-            };
-
-            let _ = app_handle.emit(event_name, event);
+        match model_downloader::download_model_with_progress(&model_type_clone, &app_handle).await {
+            Ok(path) => {
+                tracing::info!("Model {} downloaded to {:?}", model_type_clone, path);
+            }
+            Err(e) => {
+                tracing::error!("Failed to download model {}: {}", model_type_clone, e);
+                let _ = app_handle.emit("download-progress", model_downloader::DownloadProgress {
+                    model: model_type_clone.clone(),
+                    downloaded_bytes: 0,
+                    total_bytes: 0,
+                    progress_percent: 0,
+                    status: "error".to_string(),
+                    error: Some(e),
+                });
+            }
         }
     });
 
-    // Start the orchestrator
-    orchestrator.start()
-        .await
-        .map_err(|e| format!("Failed to start orchestrator: {}", e))?;
-
-    // Store orchestrator in state
-    // Note: We need to do this through a mutable reference, which requires
-    // a different approach in Tauri. For now, we'll skip storing it.
-
-    Ok(format!("Translation started: {} -> {}", source_lang, target_lang))
+    Ok(format!("Download started for {}", model_type))
 }
 
-/// Stop the translation process
+/// Download all models that aren't already downloaded
 #[tauri::command]
-async fn stop_translation(state: State<'_, AuralisState>) -> Result<String, String> {
-    if !state.is_translating().await {
-        return Err("Translation is not running".to_string());
+pub async fn download_all_models(
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    use crate::model_downloader;
+
+    let models_dir = model_downloader::ensure_models_dir().await?;
+    let mut to_download = Vec::new();
+
+    for model_type in model_downloader::ModelRegistry::all_models() {
+        let (_, filename) = model_downloader::ModelRegistry::get_model_info(model_type)?;
+        let target_path = models_dir.join(filename);
+
+        let needs_download = !target_path.exists() ||
+            std::fs::metadata(&target_path).map(|m| m.len() == 0).unwrap_or(true);
+
+        if needs_download {
+            to_download.push(model_type.to_string());
+        }
     }
 
-    // Stop the orchestrator
-    if let Some(orch) = state.orchestrator() {
-        orch.stop()
-            .await
-            .map_err(|e| format!("Failed to stop translation: {}", e))?;
+    if to_download.is_empty() {
+        return Ok("All models already downloaded".to_string());
     }
 
-    Ok("Translation stopped".to_string())
-}
+    let count = to_download.len();
+    let app = app_handle.clone();
+    tokio::spawn(async move {
+        for model_type in &to_download {
+            match model_downloader::download_model_with_progress(model_type, &app).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to download {}: {}", model_type, e);
+                    let _ = app.emit("download-progress", model_downloader::DownloadProgress {
+                        model: model_type.clone(),
+                        downloaded_bytes: 0,
+                        total_bytes: 0,
+                        progress_percent: 0,
+                        status: "error".to_string(),
+                        error: Some(e),
+                    });
+                }
+            }
+        }
+    });
 
-/// Get the current model status
-#[tauri::command]
-async fn get_model_status(state: State<'_, AuralisState>) -> Result<ModelStatus, String> {
-    Ok(state.model_status().await)
-}
-
-/// Subscribe to events (returns the current event stream)
-#[tauri::command]
-async fn subscribe_events() -> Result<String, String> {
-    Ok("Events subscribed".to_string())
-}
-
-/// Set the source language
-#[tauri::command]
-async fn set_source_language(
-    state: State<'_, AuralisState>,
-    language: String,
-) -> Result<String, String> {
-    state.set_source_language(language.clone()).await;
-    Ok(format!("Source language set to: {}", language))
-}
-
-/// Set the target language
-#[tauri::command]
-async fn set_target_language(
-    state: State<'_, AuralisState>,
-    language: String,
-) -> Result<String, String> {
-    state.set_target_language(language.clone()).await;
-    Ok(format!("Target language set to: {}", language))
-}
-
-/// Check if translation is currently running
-#[tauri::command]
-async fn is_translation_running(state: State<'_, AuralisState>) -> Result<bool, String> {
-    Ok(state.is_translating().await)
-}
-
-/// Get the current language configuration
-#[tauri::command]
-async fn get_languages(state: State<'_, AuralisState>) -> Result<(String, String), String> {
-    Ok((
-        state.source_language().await,
-        state.target_language().await,
-    ))
+    Ok(format!("Downloading {} models", count))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    #[test]
+    fn test_greet() {
+        let result = super::greet("World");
+        assert_eq!(result, "Hello, World! You've been greeted from Rust!");
+    }
 
     #[test]
-    fn test_command_responses() {
-        // Test that commands return the expected response types
-        // Actual command testing would require a Tauri test context
-
-        let source_lang = "en".to_string();
-        let target_lang = "es".to_string();
-
-        assert_eq!(
-            format!("Translation started: {} -> {}", source_lang, target_lang),
-            "Translation started: en -> es"
-        );
-
-        assert_eq!(
-            format!("Source language set to: {}", source_lang),
-            "Source language set to: en"
-        );
-
-        assert_eq!(
-            format!("Target language set to: {}", target_lang),
-            "Target language set to: es"
-        );
+    fn test_greet_empty() {
+        let result = super::greet("");
+        assert_eq!(result, "Hello, ! You've been greeted from Rust!");
     }
 }

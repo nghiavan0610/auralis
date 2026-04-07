@@ -59,8 +59,8 @@ pub enum STTError {
 /// Errors that can occur during translation
 #[derive(Error, Debug)]
 pub enum TranslationError {
-    #[error("Unsupported language pair: {source} -> {target}")]
-    UnsupportedLanguagePair { source: String, target: String },
+    #[error("Unsupported language pair: {0} -> {1}")]
+    UnsupportedLanguagePair(String, String),
 
     #[error("Failed to connect to translation service: {service}")]
     ConnectionError { service: String },
@@ -163,10 +163,10 @@ mod tests {
 
     #[test]
     fn test_translation_error_display() {
-        let error = TranslationError::UnsupportedLanguagePair {
-            source: "en".to_string(),
-            target: "xx".to_string(),
-        };
+        let error = TranslationError::UnsupportedLanguagePair(
+            "en".to_string(),
+            "xx".to_string(),
+        );
         assert_eq!(
             error.to_string(),
             "Unsupported language pair: en -> xx"

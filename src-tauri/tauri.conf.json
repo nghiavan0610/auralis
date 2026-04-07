@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.sentialab.auralis",
   "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
-    "devUrl": "../src",
-    "frontendDist": "../src"
+    "beforeDevCommand": "npm run dev:frontend",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [

@@ -1,5 +1,6 @@
 //! Unit tests for audio capture functionality
 
+use auralis::domain::AudioSource;
 use auralis::infrastructure::audio::{AudioCaptureConfig, MicrophoneCapture};
 
 #[test]
@@ -134,7 +135,7 @@ fn test_audio_capture_config_buffer_size_calculation() {
 
         assert_eq!(
             audio_config.buffer_size,
-            expected_buffer_size,
+            expected_buffer_size as usize,
             "Buffer size calculation failed for sample_rate={}, channels={}, chunk_duration_ms={}",
             sample_rate, channels, chunk_duration_ms
         );
@@ -207,7 +208,7 @@ fn test_audio_capture_config_various_chunk_durations() {
         let expected_buffer_size = (16000 * 1 * chunk_duration_ms) / 1000;
         assert_eq!(
             audio_config.buffer_size,
-            expected_buffer_size,
+            expected_buffer_size as usize,
             "Buffer size mismatch for chunk duration {}ms",
             chunk_duration_ms
         );

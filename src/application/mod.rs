@@ -1,10 +1,5 @@
-//! Application layer - orchestration and business logic
+//! Application layer - business logic
 //!
-//! This layer contains the orchestration logic that coordinates all components
-//! and manages the event system for communication between components.
-
-pub mod events;
-pub mod orchestrator;
-
-pub use events::{AuralisEvent, EventBus};
-pub use orchestrator::{Orchestrator, PhraseDetector};
+//! This module is reserved for future application-level logic.
+//! The old orchestrator and event bus have been removed in favour
+//! of the dual-mode architecture (cloud via Soniox / offline via Python sidecar).

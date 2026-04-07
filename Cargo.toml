@@ -1,5 +1,5 @@
 [workspace]
-members = ["."]
+members = [".", "src-tauri"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -21,16 +21,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Utilities
 futures = "0.3"
+dirs = "5.0"
 
 # Audio
 cpal = "0.15"
-
-# STT (whisper.cpp)
-whisper-rs = "0.11"
-
-# Python Integration
-pyo3 = { version = "0.22", features = ["auto-initialize"] }
-pyo3-asyncio = { version = "0.22", features = ["tokio-runtime"] }
 
 # Desktop framework (added later in src-tauri)
 tauri = { version = "2.1", features = ["macos-private-api"] }
@@ -53,20 +47,12 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures = { workspace = true }
 
-# Add new workspace dependencies for testing
 cpal = { workspace = true }
-whisper-rs = { workspace = true }
-pyo3 = { workspace = true }
-pyo3-asyncio = { workspace = true }
+dirs = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-criterion = "0.5"
 
-[[bench]]
-name = "latency"
-harness = false
-
-[[bench]]
-name = "memory"
-harness = false
+[[test]]
+name = "unit"
+path = "tests/unit/mod.rs"

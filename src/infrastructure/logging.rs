@@ -194,60 +194,14 @@ pub fn init_logging(config: LoggingConfig) -> Result<(), LoggingError> {
             .unwrap_or_else(|_| EnvFilter::new(config.log_level.to_string()))
     };
 
-    // Build the subscriber
-    let subscriber = Registry::default().with(env_filter);
-
-    // Add console layer if enabled
-    let subscriber = if config.console {
-        let console_layer = fmt::layer()
-            .with_writer(io::stdout)
-            .with_ansi(config.ansi)
-            .with_target(config.with_target)
-            .with_thread_ids(config.with_thread_ids);
-
-        let console_layer = if config.span_events {
-            console_layer.with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-        } else {
-            console_layer
-        };
-
-        subscriber.with(console_layer)
-    } else {
-        subscriber
-    };
-
-    // Add file layers if enabled
-    let subscriber = if let Some(ref dir) = log_dir {
-        // Main log file (all levels)
-        let main_log_path = dir.join(MAIN_LOG_FILE);
-        let main_log_file = std::fs::File::create(&main_log_path)
-            .map_err(LoggingError::FileError)?;
-
-        let main_layer = fmt::layer()
-            .with_writer(main_log_file)
-            .with_ansi(false)
-            .with_target(config.with_target)
-            .with_thread_ids(config.with_thread_ids);
-
-        // Error log file (ERROR and WARN only)
-        let error_log_path = dir.join(ERROR_LOG_FILE);
-        let error_log_file = std::fs::File::create(&error_log_path)
-            .map_err(LoggingError::FileError)?;
-
-        let error_filter = EnvFilter::new("warn")
-            .add_directive("auralis=error".parse().unwrap());
-
-        let error_layer = fmt::layer()
-            .with_writer(error_log_file)
-            .with_ansi(false)
-            .with_target(config.with_target)
-            .with_thread_ids(config.with_thread_ids)
-            .with_filter(error_filter);
-
-        subscriber.with(main_layer).with(error_layer)
-    } else {
-        subscriber
-    };
+    // Build the subscriber with all layers
+    let subscriber = Registry::default()
+        .with(env_filter)
+        .with(
+            fmt::layer()
+                .with_writer(io::stdout)
+                .with_ansi(config.ansi)
+        );
 
     // Initialize the global subscriber
     subscriber.init();

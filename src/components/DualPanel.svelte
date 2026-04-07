@@ -1,15 +1,25 @@
 <script lang="ts">
-  import type { STTSegment, Translation } from '@tauri-apps/api';
-
-  export let sourceLanguage: string;
-  export let targetLanguage: string;
-  export let transcriptions: Array<{
-    segment: STTSegment;
+  interface TranscriptEntry {
+    text: string;
     language: string;
-  }>;
-  export let translations: Array<{
-    translation: Translation;
-  }>;
+    timestamp: number;
+    is_final: boolean;
+  }
+
+  interface TranslationEntry {
+    original: string;
+    translated: string;
+    source_lang: string;
+    target_lang: string;
+    timestamp: number;
+  }
+
+  let { sourceLanguage, targetLanguage, transcriptions, translations }: {
+    sourceLanguage: string;
+    targetLanguage: string;
+    transcriptions: TranscriptEntry[];
+    translations: TranslationEntry[];
+  } = $props();
 
   function formatTime(ms: number): string {
     const seconds = Math.floor(ms / 1000);
@@ -22,18 +32,21 @@
 <div class="dual-panel">
   <div class="panel">
     <div class="panel-header">
-      <span class="panel-title">English ({sourceLanguage})</span>
+      <span class="panel-title">Source ({sourceLanguage})</span>
       <span class="panel-title" style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">
         {transcriptions.length} segments
       </span>
     </div>
     <div class="panel-content">
-      {#each transcriptions as item, index}
-        <div class="transcription-item">
-          <div class="transcription-text">{item.segment.text}</div>
+      {#each transcriptions as item}
+        <div class="transcription-item" class:provisional={!item.is_final}>
+          <div class="transcription-text">{item.text}</div>
           <div class="transcription-meta">
-            Confidence: {(item.segment.confidence * 100).toFixed(0)}% |
-            {formatTime(item.segment.start)} - {formatTime(item.segment.end)}
+            {item.language} |
+            {formatTime(item.timestamp)}
+            {#if !item.is_final}
+              <span class="provisional-tag">...</span>
+            {/if}
           </div>
         </div>
       {/each}
@@ -47,18 +60,21 @@
 
   <div class="panel">
     <div class="panel-header">
-      <span class="panel-title">Vietnamese ({targetLanguage})</span>
+      <span class="panel-title">Translation ({targetLanguage})</span>
       <span class="panel-title" style="font-size: 0.85rem; color: rgba(255,255,255,0.6);">
         {translations.length} translations
       </span>
     </div>
     <div class="panel-content">
-      {#each translations as item, index}
+      {#each translations as item}
         <div class="transcription-item">
-          <div class="transcription-text">{item.translation.translated_text}</div>
+          <div class="transcription-text">{item.translated}</div>
+          {#if item.original}
+            <div class="original-text">{item.original}</div>
+          {/if}
           <div class="transcription-meta">
-            Score: {item.translation.score.toFixed(2)} |
-            {item.translation.source_lang} → {item.translation.target_lang}
+            {item.source_lang} -> {item.target_lang} |
+            {formatTime(item.timestamp)}
           </div>
         </div>
       {/each}
@@ -72,6 +88,14 @@
 </div>
 
 <style>
+  .dual-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 1rem;
+    height: 400px;
+  }
+
   .panel {
     background-color: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -112,15 +136,32 @@
     animation: fadeIn 0.3s ease-in;
   }
 
+  .transcription-item.provisional {
+    opacity: 0.7;
+    border-left: 3px solid rgba(100, 108, 255, 0.3);
+  }
+
   .transcription-text {
     font-size: 0.95rem;
     line-height: 1.4;
     margin-bottom: 0.25rem;
   }
 
+  .original-text {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 0.25rem;
+    font-style: italic;
+  }
+
   .transcription-meta {
     font-size: 0.8rem;
     color: rgba(255, 255, 255, 0.5);
+  }
+
+  .provisional-tag {
+    color: rgba(100, 108, 255, 0.6);
+    margin-left: 0.25rem;
   }
 
   @keyframes fadeIn {
@@ -131,6 +172,13 @@
     to {
       opacity: 1;
       transform: translateY(0);
+    }
+  }
+
+  @media (max-width: 768px) {
+    .dual-panel {
+      grid-template-columns: 1fr;
+      height: auto;
     }
   }
 </style>

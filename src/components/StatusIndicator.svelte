@@ -1,7 +1,9 @@
 <script lang="ts">
-  export let status: 'ready' | 'error' | 'processing' | 'idle' = 'idle';
-  export let text: string = '';
-  export let showDot: boolean = true;
+  let { status = 'idle', text = '', showDot = true }: {
+    status?: 'ready' | 'error' | 'processing' | 'idle';
+    text?: string;
+    showDot?: boolean;
+  } = $props();
 </script>
 
 <div class="status-indicator {status}">

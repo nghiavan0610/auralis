@@ -1,11 +1,14 @@
 // Library exports for testing and external usage
-pub use main::greet;
 
 // Export state and commands
 pub mod state;
 pub mod commands;
+pub mod model_downloader;
+pub mod commands_audio;
+pub mod commands_settings;
+pub mod commands_pipeline;
 
-pub use state::{AuralisState, ModelStatus};
+pub use state::{AuralisState, ModelStatus, Settings};
 pub use commands::*;
 
 #[cfg(test)]
