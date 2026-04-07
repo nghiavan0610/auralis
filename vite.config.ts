@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
-  plugins: [svelte()],
+  plugins: [svelte({
+    preprocess: [],
+  })],
 
   // Vite options tailored for Tauri development
   clearScreen: false,
