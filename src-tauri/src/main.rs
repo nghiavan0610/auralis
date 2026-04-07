@@ -8,6 +8,16 @@ use state::AuralisState;
 use commands::*;
 
 fn main() {
+    // Initialize logging based on build configuration
+    #[cfg(debug_assertions)]
+    let _ = auralis::infrastructure::logging::init_dev_logging();
+
+    #[cfg(not(debug_assertions))]
+    let _ = auralis::infrastructure::logging::init_default_logging();
+
+    // Log application startup
+    tracing::info!("Starting Auralis application");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AuralisState::new())
