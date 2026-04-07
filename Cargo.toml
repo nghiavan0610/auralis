@@ -61,3 +61,12 @@ pyo3-asyncio = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
+criterion = "0.5"
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "memory"
+harness = false
