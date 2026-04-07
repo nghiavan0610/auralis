@@ -7,3 +7,6 @@ pub mod audio;
 pub mod stt;
 pub mod translation;
 pub mod vad;
+pub mod container;
+
+pub use container::{AuralisContainer, ContainerConfig, ModelStatus};
