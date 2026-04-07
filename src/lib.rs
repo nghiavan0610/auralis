@@ -8,3 +8,6 @@ pub use domain::{
 };
 
 pub use infrastructure::audio::{AudioCaptureConfig, MicrophoneCapture};
+pub use infrastructure::stt::{WhisperConfig, WhisperEngine};
+pub use infrastructure::translation::{MadladConfig, MadladTranslator};
+pub use infrastructure::vad::{SileroConfig, SileroVAD};

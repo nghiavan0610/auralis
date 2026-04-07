@@ -5,4 +5,6 @@
 //! - WebRTC VAD
 //! - Energy-based VAD
 
-// VAD implementations will be added in Task 9
+pub mod silero;
+
+pub use silero::{SileroConfig, SileroVAD};
