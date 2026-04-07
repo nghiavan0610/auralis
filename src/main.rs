@@ -10,10 +10,17 @@ fn main() {
 
     let translation = Translation::new(
         "en".to_string(),
-        "es".to_string(),
+        "vi".to_string(),
         "Hello".to_string(),
-        "Hola".to_string(),
+        "Xin chào".to_string(),
         0.95,
     );
     println!("Created translation: {} -> {}", translation.original_text, translation.translated_text);
+
+    // Test that new dependencies are available (compile-time check)
+    let _audio_test: Option<cpal::Device> = None;
+    let _python_test: Option<pyo3::Python> = None;
+    let _whisper_test: Option<whisper_rs::WhisperContext> = None;
+
+    println!("All dependencies loaded successfully!");
 }
