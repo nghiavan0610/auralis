@@ -1,6 +1,13 @@
 // Library exports for testing and external usage
 pub use main::greet;
 
+// Export state and commands
+pub mod state;
+pub mod commands;
+
+pub use state::{AuralisState, ModelStatus};
+pub use commands::*;
+
 #[cfg(test)]
 mod tests {
     use super::*;
