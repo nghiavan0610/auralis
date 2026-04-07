@@ -4,4 +4,6 @@
 //! - Whisper.cpp integration via whisper-rs
 //! - Streaming STT support
 
-// STT implementations will be added in Task 7
+pub mod whisper;
+
+pub use whisper::{WhisperConfig, WhisperEngine};
