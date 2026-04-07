@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.1.0",
+  "productName": "Auralis",
+  "version": "0.1.0",
+  "identifier": "com.sentialab.auralis",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devUrl": "../src",
+    "frontendDist": "../src"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Auralis",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  },
+  "plugins": {}
+}

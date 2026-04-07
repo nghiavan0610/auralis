@@ -1,0 +1,25 @@
+// Library exports for testing and external usage
+pub use main::greet;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_greet() {
+        let result = greet("World");
+        assert_eq!(result, "Hello, World! You've been greeted from Rust!");
+    }
+
+    #[test]
+    fn test_greet_empty() {
+        let result = greet("");
+        assert_eq!(result, "Hello, ! You've been greeted from Rust!");
+    }
+
+    #[test]
+    fn test_greet_special_chars() {
+        let result = greet("Test-123");
+        assert_eq!(result, "Hello, Test-123! You've been greeted from Rust!");
+    }
+}
