@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod state;
-mod model_downloader;
 #[macro_use]
 mod commands;
 mod commands_audio;
@@ -45,19 +44,15 @@ fn main() {
         })
         .manage(AuralisState::new())
         .invoke_handler(tauri::generate_handler![
-            // Core commands
+            // Core
             greet,
-            get_model_status,
-            check_model_exists,
-            download_model,
-            download_all_models,
-            // Audio commands
+            // Audio streaming
             start_audio_capture,
             stop_audio_capture,
-            // Settings commands
+            // Settings
             get_settings,
             save_settings,
-            // Pipeline commands (offline mode)
+            // Offline pipeline
             start_local_pipeline,
             stop_local_pipeline,
         ])

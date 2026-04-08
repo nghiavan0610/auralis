@@ -3,12 +3,12 @@
 //! This module provides a comprehensive logging setup using the tracing ecosystem,
 //! supporting both console and file output with configurable log levels.
 
-use tracing::{Level, Subscriber};
+use tracing::Level;
 use tracing_subscriber::{
-    fmt::{self, format::FmtSpan},
+    fmt,
     layer::SubscriberExt,
     util::SubscriberInitExt,
-    EnvFilter, Layer, Registry,
+    EnvFilter, Registry,
 };
 use std::io;
 use std::path::PathBuf;
@@ -178,7 +178,7 @@ pub enum LoggingError {
 /// ```
 pub fn init_logging(config: LoggingConfig) -> Result<(), LoggingError> {
     // Create log directory if file logging is enabled
-    let log_dir = if config.file {
+    let _log_dir = if config.file {
         let dir = config.log_dir.clone().unwrap_or_else(|| PathBuf::from(LOG_DIR_NAME));
         std::fs::create_dir_all(&dir).map_err(LoggingError::DirectoryError)?;
         Some(dir)
@@ -203,8 +203,8 @@ pub fn init_logging(config: LoggingConfig) -> Result<(), LoggingError> {
                 .with_ansi(config.ansi)
         );
 
-    // Initialize the global subscriber
-    subscriber.init();
+    // Initialize the global subscriber (ok if already set, e.g. in tests)
+    let _ = subscriber.try_init();
 
     Ok(())
 }
