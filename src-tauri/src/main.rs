@@ -8,6 +8,7 @@ mod commands;
 mod commands_audio;
 mod commands_settings;
 mod commands_pipeline;
+mod commands_tts;
 
 use state::AuralisState;
 
@@ -16,6 +17,7 @@ use commands::*;
 use commands_audio::*;
 use commands_settings::*;
 use commands_pipeline::*;
+use commands_tts::*;
 
 // Import Manager trait for window access
 use tauri::Manager;
@@ -59,6 +61,10 @@ fn main() {
             // Offline setup
             check_offline_ready,
             setup_offline_environment,
+            // TTS
+            speak_text,
+            stop_tts,
+            list_tts_voices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

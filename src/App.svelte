@@ -23,6 +23,7 @@
   let displayFontSize = $state(14);
   let displayMaxLines = $state(100);
   let endpointDelay = $state(1.0);
+  let ttsEnabled = $state(false);
   let sonioxApiKey = $state('');
   let isTranslating = $state(false);
   let statusMessage = $state('Ready');
@@ -143,6 +144,7 @@
         font_size: number;
         max_lines: number;
         endpoint_delay?: number;
+        tts_enabled?: boolean;
       }>('get_settings');
 
       if (settings.mode === 'cloud' || settings.mode === 'offline') {
@@ -164,6 +166,7 @@
         displayMaxLines = settings.max_lines;
       }
       endpointDelay = (settings.endpoint_delay as number) || 1.0;
+      ttsEnabled = settings.tts_enabled as boolean;
       sonioxApiKey = settings.soniox_api_key;
       sourceLanguage = settings.source_language;
       targetLanguage = settings.target_language;
@@ -185,6 +188,7 @@
         font_size: displayFontSize,
         max_lines: displayMaxLines,
         endpoint_delay: endpointDelay,
+        tts_enabled: ttsEnabled,
       },
     });
   }
@@ -222,6 +226,7 @@
       onTranslation: (text: string, _is_final: boolean) => {
         if (text.trim()) {
           pairTranslation(text);
+          speakTranslation(text, targetLanguage);
         }
       },
       onStatusChange: (status: ConnectionStatus) => {
@@ -301,6 +306,9 @@
 
   async function handleStop(): Promise<void> {
     try {
+      // Stop any playing TTS
+      try { await invoke('stop_tts'); } catch {}
+
       if (mode === 'cloud') {
         stopCloudMode();
         await invoke<string>('stop_audio_capture');
@@ -336,6 +344,7 @@
     font_size: number;
     max_lines: number;
     endpoint_delay: number;
+    tts_enabled: boolean;
   }) {
     mode = settings.mode;
     sonioxApiKey = settings.soniox_api_key;
@@ -347,6 +356,7 @@
     displayFontSize = settings.font_size;
     displayMaxLines = settings.max_lines;
     endpointDelay = settings.endpoint_delay;
+    ttsEnabled = settings.tts_enabled;
     persistSettings();
     currentView = 'main';
   }
@@ -362,6 +372,25 @@
     isPinned = !isPinned;
     const appWindow = getCurrentWindow();
     await appWindow.setAlwaysOnTop(isPinned);
+  }
+
+  function handleSetAudioSource(source: AudioSource) {
+    audioSource = source;
+    persistSettings();
+  }
+
+  function handleToggleTts() {
+    ttsEnabled = !ttsEnabled;
+    persistSettings();
+  }
+
+  async function speakTranslation(text: string, targetLang: string): Promise<void> {
+    if (!ttsEnabled || !text.trim()) return;
+    try {
+      await invoke('speak_text', { text, language: targetLang });
+    } catch (err) {
+      console.warn('[Auralis] TTS failed:', err);
+    }
   }
 
   function showError(msg: string) {
@@ -424,8 +453,13 @@
               segments.splice(0, segments.length - displayMaxLines);
             }
             segments = segments;
+            // Speak translated text if TTS is enabled
+            if (translated && target) {
+              speakTranslation(translated, target);
+            }
           } else if (translated) {
             pairTranslation(translated);
+            speakTranslation(translated, targetLanguage);
           }
 
           provisionalText = '';
@@ -474,10 +508,14 @@
     statusText={getStatusText()}
     statusType={getStatusType()}
     {isPinned}
+    audioSource={audioSource}
+    ttsEnabled={ttsEnabled}
     onToggleRecord={handleToggleRecord}
     onOpenSettings={handleOpenSettings}
     onClear={handleClear}
     onTogglePin={handleTogglePin}
+    onSetAudioSource={handleSetAudioSource}
+    onToggleTts={handleToggleTts}
   />
 
   {#if errorMessage}
@@ -508,6 +546,7 @@
     fontSize={displayFontSize}
     maxLines={displayMaxLines}
     endpointDelay={endpointDelay}
+    ttsEnabled={ttsEnabled}
     onSave={handleSettingsSave}
     onBack={handleSettingsBack}
   />

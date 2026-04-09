@@ -15,6 +15,7 @@
     fontSize = 14,
     maxLines = 100,
     endpointDelay = 1.0,
+    ttsEnabled = false,
     onSave,
     onBack,
   }: {
@@ -29,6 +30,7 @@
     fontSize?: number;
     maxLines?: number;
     endpointDelay?: number;
+    ttsEnabled?: boolean;
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -40,6 +42,7 @@
       font_size: number;
       max_lines: number;
       endpoint_delay: number;
+      tts_enabled: boolean;
     }) => void;
     onBack: () => void;
   } = $props();
@@ -56,7 +59,8 @@
   let localMaxLines = $state(100);
   let localEndpointDelay = $state(1.0);
   let localEndpointTenths = $state(10);
-  let activeTab = $state<'translation' | 'display' | 'about'>('translation');
+  let localTtsEnabled = $state(false);
+  let activeTab = $state<'translation' | 'display' | 'tts' | 'about'>('translation');
 
   // Update checker state
   let appVersion = $state('...');
@@ -81,6 +85,7 @@
     localOpacityPercent = Math.round(opacity * 100);
     localEndpointDelay = endpointDelay;
     localEndpointTenths = Math.round(endpointDelay * 10);
+    localTtsEnabled = ttsEnabled;
   });
 
   // Load version when About tab is opened
@@ -117,6 +122,7 @@
       font_size: localFontSize,
       max_lines: localMaxLines,
       endpoint_delay: localEndpointDelay,
+      tts_enabled: localTtsEnabled,
     });
   }
 
@@ -174,6 +180,9 @@
     </button>
     <button class="tab" class:active={activeTab === 'display'} onclick={() => activeTab = 'display'}>
       Display
+    </button>
+    <button class="tab" class:active={activeTab === 'tts'} onclick={() => activeTab = 'tts'}>
+      TTS
     </button>
     <button class="tab" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>
       About
@@ -335,10 +344,12 @@
           </label>
         </div>
 
-        <!-- 6. Endpoint Delay -->
-        <div class="section-label">Endpoint Delay</div>
-        <p class="section-desc">How long to wait after silence before finalizing. Lower = faster, higher = more complete sentences.</p>
-        <div class="slider-row">
+        <!-- Endpoint Delay card -->
+        <div class="slider-card">
+          <div class="slider-card-header">
+            <span class="slider-card-label">Endpoint Delay</span>
+            <span class="slider-card-value">{localEndpointDelay.toFixed(1)}s</span>
+          </div>
           <input
             type="range"
             min="5"
@@ -349,16 +360,20 @@
             class="slider"
             style="--fill: {((localEndpointTenths - 5) / 25) * 100}%"
           />
-          <span class="slider-value">{localEndpointDelay.toFixed(1)}s</span>
         </div>
       </div>
 
     {:else if activeTab === 'display'}
       <div class="settings-section">
-        <!-- Opacity -->
-        <div class="section-label">Opacity</div>
-        <p class="section-desc">Control the background transparency of the overlay window.</p>
-        <div class="slider-row">
+        <div class="section-label">Appearance</div>
+        <p class="section-desc">Adjust how the overlay looks and feels.</p>
+
+        <!-- Opacity card -->
+        <div class="slider-card">
+          <div class="slider-card-header">
+            <span class="slider-card-label">Background Opacity</span>
+            <span class="slider-card-value">{Math.round(localOpacity * 100)}%</span>
+          </div>
           <input
             type="range"
             min="30"
@@ -369,13 +384,14 @@
             class="slider"
             style="--fill: {((localOpacityPercent - 30) / 70) * 100}%"
           />
-          <span class="slider-value">{Math.round(localOpacity * 100)}%</span>
         </div>
 
-        <!-- Font Size -->
-        <div class="section-label" style="margin-top: var(--space-md);">Font Size</div>
-        <p class="section-desc">Change the text size of transcript entries.</p>
-        <div class="slider-row">
+        <!-- Font Size card -->
+        <div class="slider-card">
+          <div class="slider-card-header">
+            <span class="slider-card-label">Font Size</span>
+            <span class="slider-card-value">{localFontSize}px</span>
+          </div>
           <input
             type="range"
             min="12"
@@ -385,13 +401,14 @@
             class="slider"
             style="--fill: {((localFontSize - 12) / 12) * 100}%"
           />
-          <span class="slider-value">{localFontSize}px</span>
         </div>
 
-        <!-- Max Lines -->
-        <div class="section-label" style="margin-top: var(--space-md);">Max Lines</div>
-        <p class="section-desc">Maximum number of transcript segments to keep visible. Older segments are removed.</p>
-        <div class="slider-row">
+        <!-- Max Lines card -->
+        <div class="slider-card">
+          <div class="slider-card-header">
+            <span class="slider-card-label">Max Transcript Lines</span>
+            <span class="slider-card-value">{localMaxLines}</span>
+          </div>
           <input
             type="range"
             min="10"
@@ -401,8 +418,43 @@
             class="slider"
             style="--fill: {((localMaxLines - 10) / 190) * 100}%"
           />
-          <span class="slider-value">{localMaxLines}</span>
         </div>
+      </div>
+
+    {:else if activeTab === 'tts'}
+      <div class="settings-section">
+        <div class="section-label">Text-to-Speech</div>
+        <p class="section-desc">When enabled, translated text is automatically spoken aloud using macOS built-in voices.</p>
+        <div class="toggle-row">
+          <span class="toggle-label">Speak translations aloud</span>
+          <button
+            class="toggle"
+            class:active={localTtsEnabled}
+            onclick={() => localTtsEnabled = !localTtsEnabled}
+            disabled={isTranslating}
+            aria-label="Toggle text-to-speech"
+          >
+            <span class="toggle-thumb"></span>
+          </button>
+        </div>
+
+        <div class="section-label" style="margin-top: var(--space-lg);">Supported Languages</div>
+        <p class="section-desc">macOS TTS voices are available for the following target languages:</p>
+        <div class="tts-lang-grid">
+          <span class="tts-lang supported">English</span>
+          <span class="tts-lang supported">Spanish</span>
+          <span class="tts-lang supported">French</span>
+          <span class="tts-lang supported">German</span>
+          <span class="tts-lang supported">Chinese</span>
+          <span class="tts-lang supported">Japanese</span>
+          <span class="tts-lang supported">Korean</span>
+          <span class="tts-lang supported">Portuguese</span>
+          <span class="tts-lang supported">Russian</span>
+          <span class="tts-lang supported">Arabic</span>
+          <span class="tts-lang unsupported">Vietnamese</span>
+          <span class="tts-lang unsupported">Hindi</span>
+        </div>
+        <p class="section-desc tts-note">Unsupported languages will be available once Piper TTS is integrated.</p>
       </div>
 
     {:else}
@@ -797,54 +849,160 @@
     margin: 0 4px;
   }
 
-  /* Slider — smooth rounded track */
-  .slider-row {
+  /* Slider cards */
+  .slider-card {
+    padding: var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
     display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    padding: var(--space-sm) 0;
+    flex-direction: column;
+    gap: 10px;
+    transition: border-color 0.2s ease;
   }
 
+  .slider-card:hover {
+    border-color: var(--border-hover);
+  }
+
+  .slider-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .slider-card-label {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .slider-card-value {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    min-width: 40px;
+    text-align: right;
+  }
+
+  /* Slider track */
   .slider {
-    flex: 1;
+    width: 100%;
     -webkit-appearance: none;
     appearance: none;
-    height: 6px;
-    border-radius: 3px;
+    height: 4px;
+    border-radius: 2px;
     outline: none;
     cursor: pointer;
     background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--fill, 50%), rgba(255,255,255,0.08) var(--fill, 50%), rgba(255,255,255,0.08) 100%);
     transition: height 0.15s ease;
+    border: none;
   }
 
   .slider:hover {
-    height: 8px;
+    height: 5px;
   }
 
   .slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     background: white;
     cursor: pointer;
     border: none;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 0 rgba(99, 140, 255, 0);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
     transition: box-shadow 0.2s ease, transform 0.2s ease;
   }
 
   .slider::-webkit-slider-thumb:hover {
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 6px rgba(99, 140, 255, 0.15);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 5px rgba(99, 140, 255, 0.15);
     transform: scale(1.05);
   }
 
-  .slider-value {
+  /* Toggle switch */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) 0;
+  }
+
+  .toggle-label {
     font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    min-width: 36px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+
+  .toggle {
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .toggle.active {
+    background: var(--accent);
+  }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    transition: transform 0.2s ease;
+    pointer-events: none;
+  }
+
+  .toggle.active .toggle-thumb {
+    transform: translateX(18px);
+  }
+
+  .toggle:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* TTS language grid */
+  .tts-lang-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: var(--space-xs);
+  }
+
+  .tts-lang {
+    font-size: var(--font-size-xs);
+    padding: 3px 10px;
+    border-radius: 12px;
     font-weight: 500;
+  }
+
+  .tts-lang.supported {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid rgba(99, 140, 255, 0.2);
+  }
+
+  .tts-lang.unsupported {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+
+  .tts-note {
+    margin-top: var(--space-xs);
+    font-style: italic;
   }
 </style>

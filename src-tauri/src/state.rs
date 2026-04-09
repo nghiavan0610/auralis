@@ -109,6 +109,8 @@ pub struct AuralisState {
     pub pipeline: Arc<std::sync::Mutex<Option<PipelineState>>>,
     /// Set to true when the Python pipeline emits {"type": "ready"}
     pub pipeline_ready: Arc<AtomicBool>,
+    /// Currently running TTS process (if any)
+    pub tts_process: Arc<std::sync::Mutex<Option<std::process::Child>>>,
 }
 
 impl AuralisState {
@@ -120,6 +122,7 @@ impl AuralisState {
             settings: Arc::new(Mutex::new(Settings::default())),
             pipeline: Arc::new(std::sync::Mutex::new(None)),
             pipeline_ready: Arc::new(AtomicBool::new(false)),
+            tts_process: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
