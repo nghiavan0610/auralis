@@ -38,6 +38,9 @@ pub struct Settings {
     /// Seconds of silence before finalizing a speech segment (VAD endpoint delay, 0.5–3.0)
     #[serde(default = "default_endpoint_delay")]
     pub endpoint_delay: f64,
+    /// Whether TTS is enabled (speak translated text aloud)
+    #[serde(default = "default_tts_enabled")]
+    pub tts_enabled: bool,
 }
 
 fn default_translation_type() -> String {
@@ -64,6 +67,10 @@ fn default_endpoint_delay() -> f64 {
     1.0
 }
 
+fn default_tts_enabled() -> bool {
+    false
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -77,6 +84,7 @@ impl Default for Settings {
             font_size: default_font_size(),
             max_lines: default_max_lines(),
             endpoint_delay: default_endpoint_delay(),
+            tts_enabled: default_tts_enabled(),
         }
     }
 }
