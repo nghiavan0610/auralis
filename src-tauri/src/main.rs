@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release builds
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio;
 mod state;
 #[macro_use]
 mod commands;
@@ -55,6 +56,9 @@ fn main() {
             // Offline pipeline
             start_local_pipeline,
             stop_local_pipeline,
+            // Offline setup
+            check_offline_ready,
+            setup_offline_environment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

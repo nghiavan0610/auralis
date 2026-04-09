@@ -2,32 +2,13 @@
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { SonioxClient } from './js/soniox';
   import type { ConnectionStatus } from './js/soniox';
-  import StatusIndicator from './components/StatusIndicator.svelte';
-  import DualPanel from './components/DualPanel.svelte';
-  import ModelDownloader from './components/ModelDownloader.svelte';
-
-  // ---------------------------------------------------------------------------
-  // Types
-  // ---------------------------------------------------------------------------
-
-  interface TranscriptEntry {
-    text: string;
-    language: string;
-    timestamp: number;
-    is_final: boolean;
-  }
-
-  interface TranslationEntry {
-    original: string;
-    translated: string;
-    source_lang: string;
-    target_lang: string;
-    timestamp: number;
-  }
-
-  type OperatingMode = 'cloud' | 'offline';
+  import type { Segment, OperatingMode, TranslationType, AudioSource } from './types';
+  import ControlBar from './components/ControlBar.svelte';
+  import Transcript from './components/Transcript.svelte';
+  import SettingsView from './components/SettingsView.svelte';
 
   // ---------------------------------------------------------------------------
   // State
@@ -36,38 +17,50 @@
   let mode: OperatingMode = $state('cloud');
   let sourceLanguage = $state('en');
   let targetLanguage = $state('vi');
+  let translationType: TranslationType = $state('one_way');
+  let audioSource: AudioSource = $state('microphone');
+  let displayOpacity = $state(0.88);
+  let displayFontSize = $state(14);
+  let displayMaxLines = $state(100);
+  let endpointDelay = $state(1.0);
   let sonioxApiKey = $state('');
   let isTranslating = $state(false);
-  let audioCapturing = $state(false);
   let statusMessage = $state('Ready');
   let errorMessage = $state('');
   let sonioxConnectionStatus: ConnectionStatus | null = $state(null);
 
-  let transcriptions: TranscriptEntry[] = $state([]);
-  let translations: TranslationEntry[] = $state([]);
-
-  // Provisional (in-progress) transcription from Soniox
+  // Segment-based transcript model
+  let segments: Segment[] = $state([]);
+  let segmentIdCounter = 0;
   let provisionalText = $state('');
+  let provisionalLang = $state('');
 
-  // Soniox client instance for cloud mode
+  // UI state
+  let currentView: 'main' | 'settings' = $state('main');
+  let isPinned = $state(false);
+
+  // Apply display settings as CSS custom properties
+  $effect(() => {
+    document.documentElement.style.setProperty('--app-opacity', String(displayOpacity));
+    document.documentElement.style.setProperty('--font-size-base', `${displayFontSize}px`);
+  });
+
+  // Soniox client instance
   let sonioxClient: SonioxClient | null = null;
 
   // Event listener cleanup handles
   const unlisteners: Array<() => void> = [];
 
+  // Error toast timer
+  let errorTimer: ReturnType<typeof setTimeout> | null = null;
+
   // ---------------------------------------------------------------------------
   // Computed helpers
   // ---------------------------------------------------------------------------
 
-  function canStart(): boolean {
-    if (isTranslating) return false;
-    if (mode === 'cloud' && !sonioxApiKey.trim()) return false;
-    return true;
-  }
-
-  function getStatusIndicator(): 'ready' | 'error' | 'processing' | 'idle' {
+  function getStatusType(): 'idle' | 'recording' | 'error' | 'ready' {
     if (errorMessage) return 'error';
-    if (isTranslating) return 'processing';
+    if (isTranslating) return 'recording';
     if (mode === 'cloud' && sonioxConnectionStatus === 'connected') return 'ready';
     return 'idle';
   }
@@ -77,16 +70,60 @@
     if (isTranslating) {
       if (mode === 'cloud') {
         const statusMap: Record<string, string> = {
-          connecting: 'Connecting to Soniox...',
-          connected: 'Translating (cloud)...',
+          connecting: 'Connecting...',
+          connected: 'Translating...',
           disconnected: 'Disconnected',
           error: 'Connection error',
         };
-        return statusMap[sonioxConnectionStatus ?? ''] ?? 'Translating (cloud)...';
+        return statusMap[sonioxConnectionStatus ?? ''] ?? 'Translating...';
       }
-      return 'Translating (offline)...';
+      return 'Translating...';
     }
     return statusMessage;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Segment helpers
+  // ---------------------------------------------------------------------------
+
+  function addSegment(original: string, detectedLang: string, targetLang: string): void {
+    segmentIdCounter++;
+    segments.push({
+      id: segmentIdCounter,
+      original: original.trim(),
+      translated: '',
+      detectedLang,
+      targetLang,
+      status: 'pending',
+      timestamp: Date.now(),
+    });
+    if (segments.length > displayMaxLines) {
+      segments.splice(0, segments.length - displayMaxLines);
+    }
+    segments = segments;
+  }
+
+  /** Pair translation with the oldest pending segment */
+  function pairTranslation(translatedText: string): void {
+    const idx = segments.findIndex((s) => s.status === 'pending');
+    if (idx !== -1) {
+      segments[idx].translated = translatedText.trim();
+      segments[idx].status = 'translated';
+      segments = segments;
+    } else {
+      // Translation without a pending original — create a translated-only segment
+      segmentIdCounter++;
+      segments.push({
+        id: segmentIdCounter,
+        original: '',
+        translated: translatedText.trim(),
+        detectedLang: '',
+        targetLang: '',
+        status: 'translated',
+        timestamp: Date.now(),
+      });
+      segments = segments;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -100,11 +137,33 @@
         soniox_api_key: string;
         source_language: string;
         target_language: string;
+        translation_type: string;
+        audio_source: string;
+        opacity: number;
+        font_size: number;
+        max_lines: number;
+        endpoint_delay?: number;
       }>('get_settings');
 
       if (settings.mode === 'cloud' || settings.mode === 'offline') {
         mode = settings.mode;
       }
+      if (settings.translation_type === 'one_way' || settings.translation_type === 'two_way') {
+        translationType = settings.translation_type;
+      }
+      if (settings.audio_source === 'microphone' || settings.audio_source === 'system' || settings.audio_source === 'both') {
+        audioSource = settings.audio_source;
+      }
+      if (settings.opacity >= 0.3 && settings.opacity <= 1.0) {
+        displayOpacity = settings.opacity;
+      }
+      if (settings.font_size >= 12 && settings.font_size <= 24) {
+        displayFontSize = settings.font_size;
+      }
+      if (settings.max_lines >= 10 && settings.max_lines <= 200) {
+        displayMaxLines = settings.max_lines;
+      }
+      endpointDelay = (settings.endpoint_delay as number) || 1.0;
       sonioxApiKey = settings.soniox_api_key;
       sourceLanguage = settings.source_language;
       targetLanguage = settings.target_language;
@@ -120,6 +179,12 @@
         soniox_api_key: sonioxApiKey,
         source_language: sourceLanguage,
         target_language: targetLanguage,
+        translation_type: translationType,
+        audio_source: audioSource,
+        opacity: displayOpacity,
+        font_size: displayFontSize,
+        max_lines: displayMaxLines,
+        endpoint_delay: endpointDelay,
       },
     });
   }
@@ -129,68 +194,48 @@
   // ---------------------------------------------------------------------------
 
   async function startCloudMode(): Promise<void> {
-    // Create the Soniox client with callbacks
     sonioxClient = new SonioxClient({
       api_key: sonioxApiKey,
       source_language: sourceLanguage,
       target_language: targetLanguage,
-      translation_type: 'one_way',
-      onOriginal: (text: string, is_final: boolean) => {
+      translation_type: translationType,
+      endpoint_delay: endpointDelay,
+      onOriginal: (text: string, is_final: boolean, language?: string) => {
         if (is_final && text.trim()) {
-          transcriptions = [
-            ...transcriptions,
-            {
-              text: text.trim(),
-              language: sourceLanguage,
-              timestamp: Date.now(),
-              is_final: true,
-            },
-          ];
-          if (transcriptions.length > 100) {
-            transcriptions = transcriptions.slice(-100);
-          }
+          const detectedLang = language ?? sourceLanguage;
+          // Determine target lang: in two-way, it's the "other" language
+          const target = translationType === 'two_way'
+            ? (detectedLang === sourceLanguage ? targetLanguage : sourceLanguage)
+            : targetLanguage;
+          addSegment(text, detectedLang, target);
           provisionalText = '';
+          provisionalLang = '';
         } else if (!is_final) {
-          // Update provisional (in-progress) text
           provisionalText = text;
+          provisionalLang = language ?? '';
+        } else {
+          // Empty final = clear provisional
+          provisionalText = '';
+          provisionalLang = '';
         }
       },
       onTranslation: (text: string, _is_final: boolean) => {
         if (text.trim()) {
-          // Find the most recent transcription to pair with this translation
-          const lastOriginal =
-            transcriptions.length > 0
-              ? transcriptions[transcriptions.length - 1].text
-              : '';
-          translations = [
-            ...translations,
-            {
-              original: lastOriginal,
-              translated: text.trim(),
-              source_lang: sourceLanguage,
-              target_lang: targetLanguage,
-              timestamp: Date.now(),
-            },
-          ];
-          if (translations.length > 100) {
-            translations = translations.slice(-100);
-          }
+          pairTranslation(text);
         }
       },
       onStatusChange: (status: ConnectionStatus) => {
         sonioxConnectionStatus = status;
       },
       onError: (error: string) => {
-        errorMessage = error;
+        showError(error);
         statusMessage = 'Connection error';
       },
     });
 
-    // Start the Rust audio capture (streams PCM via "audio-data" events)
-    const captureResult = await invoke<string>('start_audio_capture');
+    const captureResult = await invoke<string>('start_audio_capture', { source: audioSource });
     statusMessage = captureResult;
 
-    // Connect Soniox WebSocket
     sonioxClient.connect();
   }
 
@@ -201,6 +246,7 @@
     }
     sonioxConnectionStatus = null;
     provisionalText = '';
+    provisionalLang = '';
   }
 
   // ---------------------------------------------------------------------------
@@ -208,8 +254,10 @@
   // ---------------------------------------------------------------------------
 
   async function startOfflineMode(): Promise<void> {
-    await invoke('start_local_pipeline');
+    console.log('[Auralis] Starting offline pipeline, source:', audioSource);
+    await invoke('start_local_pipeline', { source: audioSource });
     statusMessage = 'Starting offline pipeline...';
+    console.log('[Auralis] Pipeline invoke returned');
   }
 
   async function stopOfflineMode(): Promise<void> {
@@ -218,16 +266,24 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Start / Stop handlers
+  // UI Handlers
   // ---------------------------------------------------------------------------
+
+  async function handleToggleRecord(): Promise<void> {
+    if (isTranslating) {
+      await handleStop();
+    } else {
+      await handleStart();
+    }
+  }
 
   async function handleStart(): Promise<void> {
     try {
       errorMessage = '';
       isTranslating = true;
       statusMessage = 'Starting...';
+      console.log('[Auralis] handleStart, mode:', mode);
 
-      // Save settings before starting either mode
       await persistSettings();
 
       if (mode === 'cloud') {
@@ -236,6 +292,7 @@
         await startOfflineMode();
       }
     } catch (error) {
+      console.error('[Auralis] Start failed:', error);
       errorMessage = `Failed to start: ${error}`;
       statusMessage = 'Start failed';
       isTranslating = false;
@@ -260,6 +317,61 @@
     }
   }
 
+  function handleOpenSettings() {
+    currentView = 'settings';
+  }
+
+  function handleSettingsBack() {
+    currentView = 'main';
+  }
+
+  function handleSettingsSave(settings: {
+    mode: OperatingMode;
+    soniox_api_key: string;
+    source_language: string;
+    target_language: string;
+    translation_type: TranslationType;
+    audio_source: AudioSource;
+    opacity: number;
+    font_size: number;
+    max_lines: number;
+    endpoint_delay: number;
+  }) {
+    mode = settings.mode;
+    sonioxApiKey = settings.soniox_api_key;
+    sourceLanguage = settings.source_language;
+    targetLanguage = settings.target_language;
+    translationType = settings.translation_type;
+    audioSource = settings.audio_source;
+    displayOpacity = settings.opacity;
+    displayFontSize = settings.font_size;
+    displayMaxLines = settings.max_lines;
+    endpointDelay = settings.endpoint_delay;
+    persistSettings();
+    currentView = 'main';
+  }
+
+  function handleClear() {
+    segments.length = 0;
+    segments = segments;
+    provisionalText = '';
+    provisionalLang = '';
+  }
+
+  async function handleTogglePin() {
+    isPinned = !isPinned;
+    const appWindow = getCurrentWindow();
+    await appWindow.setAlwaysOnTop(isPinned);
+  }
+
+  function showError(msg: string) {
+    errorMessage = msg;
+    if (errorTimer) clearTimeout(errorTimer);
+    errorTimer = setTimeout(() => {
+      errorMessage = '';
+    }, 5000);
+  }
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
@@ -267,66 +379,63 @@
   onMount(async () => {
     await loadSettings();
 
-    // --- Cloud mode: audio-data forwarding to Soniox ---
     const audioDataUnlisten = await listen<ArrayBuffer>('audio-data', (event) => {
       if (sonioxClient && mode === 'cloud') {
         sonioxClient.sendAudio(event.payload);
       }
     });
 
-    // --- Cloud mode: mic capture status ---
-    const audioCaptureUnlisten = await listen<{ is_capturing: boolean }>(
-      'audio-capture',
-      (event) => {
-        audioCapturing = event.payload.is_capturing;
-      }
-    );
-
-    // --- Offline mode: pipeline results ---
     const pipelineResultUnlisten = await listen<string>('pipeline-result', (event) => {
       try {
         const data = JSON.parse(event.payload);
-        if (data.type === 'result') {
-          const original = data.original ?? data.source_text ?? '';
-          const translated = data.translation ?? data.translated_text ?? '';
 
-          if (original.trim()) {
-            transcriptions = [
-              ...transcriptions,
-              {
-                text: original.trim(),
-                language: data.source_lang ?? sourceLanguage,
-                timestamp: Date.now(),
-                is_final: true,
-              },
-            ];
-            if (transcriptions.length > 100) {
-              transcriptions = transcriptions.slice(-100);
+        if (data.type === 'original') {
+          // Original text from ASR — show immediately (translation will follow later)
+          const text = (data.text ?? '').trim();
+          if (text) {
+            const detectedLang = data.source_lang ?? sourceLanguage;
+            const target = data.target_lang ?? targetLanguage;
+            addSegment(text, detectedLang, target);
+          }
+        } else if (data.type === 'result') {
+          // Full result with translation — replace all pending segments with one clean entry
+          const original = (data.original ?? '').trim();
+          const translated = (data.translated ?? '').trim();
+          const detectedLang = data.source_lang ?? sourceLanguage;
+          const target = data.target_lang ?? targetLanguage;
+
+          if (original && translated) {
+            // Remove all pending segments (they were intermediate chunks)
+            // and add one clean translated segment
+            for (let i = segments.length - 1; i >= 0; i--) {
+              if (segments[i].status === 'pending') segments.splice(i, 1);
             }
+            segmentIdCounter++;
+            segments.push({
+              id: segmentIdCounter,
+              original,
+              translated,
+              detectedLang,
+              targetLang: target,
+              status: 'translated',
+              timestamp: Date.now(),
+            });
+            if (segments.length > displayMaxLines) {
+              segments.splice(0, segments.length - displayMaxLines);
+            }
+            segments = segments;
+          } else if (translated) {
+            pairTranslation(translated);
           }
 
-          if (translated.trim()) {
-            translations = [
-              ...translations,
-              {
-                original,
-                translated: translated.trim(),
-                source_lang: data.source_lang ?? sourceLanguage,
-                target_lang: data.target_lang ?? targetLanguage,
-                timestamp: Date.now(),
-              },
-            ];
-            if (translations.length > 100) {
-              translations = translations.slice(-100);
-            }
-          }
+          provisionalText = '';
+          provisionalLang = '';
         }
       } catch {
         // Non-JSON or unexpected format; ignore
       }
     });
 
-    // --- Offline mode: pipeline status ---
     const pipelineStatusUnlisten = await listen<string>('pipeline-status', (event) => {
       try {
         const data = JSON.parse(event.payload);
@@ -340,7 +449,6 @@
 
     unlisteners.push(
       audioDataUnlisten,
-      audioCaptureUnlisten,
       pipelineResultUnlisten,
       pipelineStatusUnlisten
     );
@@ -349,496 +457,76 @@
   });
 
   onDestroy(() => {
-    // Clean up Soniox client
     if (sonioxClient) {
       sonioxClient.disconnect();
       sonioxClient = null;
     }
-    // Clean up all event listeners
     for (const unlisten of unlisteners) {
       unlisten();
     }
+    if (errorTimer) clearTimeout(errorTimer);
   });
-
-  // ---------------------------------------------------------------------------
-  // Language options
-  // ---------------------------------------------------------------------------
-
-  const languages = [
-    { code: 'en', label: 'English' },
-    { code: 'vi', label: 'Vietnamese' },
-    { code: 'es', label: 'Spanish' },
-    { code: 'fr', label: 'French' },
-    { code: 'de', label: 'German' },
-    { code: 'zh', label: 'Chinese' },
-    { code: 'ja', label: 'Japanese' },
-    { code: 'ko', label: 'Korean' },
-    { code: 'pt', label: 'Portuguese' },
-    { code: 'ru', label: 'Russian' },
-    { code: 'ar', label: 'Arabic' },
-    { code: 'hi', label: 'Hindi' },
-  ];
 </script>
 
-<div class="container">
-  <header>
-    <h1>Auralis</h1>
-    <p>Real-time Speech Translation</p>
-  </header>
+{#if currentView === 'main'}
+  <ControlBar
+    {isTranslating}
+    statusText={getStatusText()}
+    statusType={getStatusType()}
+    {isPinned}
+    onToggleRecord={handleToggleRecord}
+    onOpenSettings={handleOpenSettings}
+    onClear={handleClear}
+    onTogglePin={handleTogglePin}
+  />
 
-  <div style="margin-top: 1.5rem;">
-    <StatusIndicator
-      status={getStatusIndicator()}
-      text={getStatusText()}
-    />
-    {#if errorMessage}
-      <div class="error-banner">
-        {errorMessage}
-      </div>
-    {/if}
-  </div>
-
-  <!-- Mode selector -->
-  <div class="mode-selector">
-    <span class="mode-label">Translation Mode</span>
-    <div class="mode-options">
-      <label class="mode-option" class:active={mode === 'cloud'}>
-        <input
-          type="radio"
-          name="mode"
-          value="cloud"
-          bind:group={mode}
-          disabled={isTranslating}
-        />
-        <div class="mode-card">
-          <span class="mode-name">Cloud (Soniox)</span>
-          <span class="mode-latency">~150ms latency</span>
-        </div>
-      </label>
-      <label class="mode-option" class:active={mode === 'offline'}>
-        <input
-          type="radio"
-          name="mode"
-          value="offline"
-          bind:group={mode}
-          disabled={isTranslating}
-        />
-        <div class="mode-card">
-          <span class="mode-name">Offline (MLX)</span>
-          <span class="mode-latency">~1s latency</span>
-        </div>
-      </label>
-    </div>
-  </div>
-
-  <!-- Settings -->
-  <div class="controls">
-    {#if mode === 'cloud'}
-      <div class="setting-row">
-        <label for="soniox-api-key">Soniox API Key</label>
-        <div class="api-key-input">
-          <input
-            id="soniox-api-key"
-            type="password"
-            placeholder="Enter your Soniox API key"
-            bind:value={sonioxApiKey}
-            disabled={isTranslating}
-          />
-          <a
-            href="https://soniox.com/api-keys"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="api-key-link"
-          >
-            Get API key
-          </a>
-        </div>
-      </div>
-    {/if}
-
-    <div class="language-row">
-      <div class="language-selector">
-        <label for="source-language">Source</label>
-        <select id="source-language" bind:value={sourceLanguage} disabled={isTranslating}>
-          {#each languages as lang}
-            <option value={lang.code}>{lang.label}</option>
-          {/each}
-        </select>
-      </div>
-
-      <div class="language-arrow">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 12h14M12 5l7 7-7 7"/>
-        </svg>
-      </div>
-
-      <div class="language-selector">
-        <label for="target-language">Target</label>
-        <select id="target-language" bind:value={targetLanguage} disabled={isTranslating}>
-          {#each languages as lang}
-            <option value={lang.code}>{lang.label}</option>
-          {/each}
-        </select>
-      </div>
-
-      <div style="flex: 1;"></div>
-
-      {#if !isTranslating}
-        <button class="primary" onclick={handleStart} disabled={!canStart()}>
-          Start Translation
-        </button>
-      {:else}
-        <button class="danger" onclick={handleStop}>
-          Stop Translation
-        </button>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Provisional text (in-progress transcription from cloud mode) -->
-  {#if isTranslating && mode === 'cloud' && provisionalText}
-    <div class="provisional-text">
-      <span class="provisional-label">Hearing:</span> {provisionalText}
+  {#if errorMessage}
+    <div class="error-toast">
+      {errorMessage}
     </div>
   {/if}
 
-  <!-- Dual panel: transcriptions and translations -->
-  <DualPanel
+  <Transcript
     {sourceLanguage}
     {targetLanguage}
-    {transcriptions}
-    {translations}
+    {translationType}
+    {segments}
+    {provisionalText}
+    {provisionalLang}
+    fontSize={displayFontSize}
   />
-
-  <!-- Status footer -->
-  <div class="status-footer">
-    <div class="status-item">
-      <strong>Mode:</strong>
-      {mode === 'cloud' ? 'Cloud (Soniox)' : 'Offline (MLX)'}
-    </div>
-    <div class="status-item">
-      <strong>Audio:</strong>
-      {audioCapturing ? 'Capturing' : 'Idle'}
-    </div>
-    <div class="status-item">
-      <strong>Status:</strong>
-      {statusMessage}
-    </div>
-  </div>
-
-  <!-- Model downloader for offline mode (kept separate from pipeline) -->
-  <details class="model-section">
-    <summary>Offline Model Downloads</summary>
-    <ModelDownloader />
-  </details>
-</div>
+{:else}
+  <SettingsView
+    {mode}
+    {sonioxApiKey}
+    {sourceLanguage}
+    {targetLanguage}
+    {translationType}
+    {audioSource}
+    {isTranslating}
+    opacity={displayOpacity}
+    fontSize={displayFontSize}
+    maxLines={displayMaxLines}
+    endpointDelay={endpointDelay}
+    onSave={handleSettingsSave}
+    onBack={handleSettingsBack}
+  />
+{/if}
 
 <style>
-  .container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 2rem;
-    width: 100%;
-    height: 100%;
-  }
-
-  header {
-    margin-bottom: 1rem;
-  }
-
-  h1 {
-    font-size: 2.2em;
-    line-height: 1.1;
-    margin-bottom: 0.5rem;
-  }
-
-  p {
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  /* Error banner */
-  .error-banner {
-    margin-top: 1rem;
-    color: #f44336;
-    padding: 0.75rem 1rem;
-    background-color: rgba(244, 67, 54, 0.1);
-    border-radius: 6px;
-    font-size: 0.9rem;
-    border: 1px solid rgba(244, 67, 54, 0.2);
-  }
-
-  /* Mode selector */
-  .mode-selector {
-    margin-top: 1.5rem;
-  }
-
-  .mode-label {
-    display: block;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 0.5rem;
-    font-size: 0.95rem;
-  }
-
-  .mode-options {
-    display: flex;
-    gap: 0.75rem;
-  }
-
-  .mode-option {
-    cursor: pointer;
-    flex: 1;
-  }
-
-  .mode-option input[type="radio"] {
-    display: none;
-  }
-
-  .mode-card {
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background-color: rgba(255, 255, 255, 0.03);
-    transition: all 0.2s ease;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .mode-option:hover .mode-card {
-    border-color: rgba(255, 255, 255, 0.3);
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-
-  .mode-option.active .mode-card {
-    border-color: #646cff;
-    background-color: rgba(100, 108, 255, 0.1);
-  }
-
-  .mode-name {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .mode-latency {
-    font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  /* Controls */
-  .controls {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    margin-top: 1rem;
-    padding: 1rem;
-    background-color: rgba(255, 255, 255, 0.03);
-    border-radius: 8px;
-  }
-
-  .setting-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .setting-row label {
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 0.9rem;
-  }
-
-  .api-key-input {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .api-key-input input {
-    flex: 1;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background-color: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 0.9rem;
-    font-family: monospace;
-  }
-
-  .api-key-input input:focus {
-    outline: none;
-    border-color: #646cff;
-  }
-
-  .api-key-input input:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .api-key-input input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
-  }
-
-  .api-key-link {
-    color: #646cff;
-    font-size: 0.85rem;
-    text-decoration: none;
-    white-space: nowrap;
-  }
-
-  .api-key-link:hover {
-    text-decoration: underline;
-  }
-
-  .language-row {
-    display: flex;
-    gap: 0.75rem;
-    align-items: flex-end;
-  }
-
-  .language-selector {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-
-  .language-selector label {
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 0.85rem;
-  }
-
-  .language-arrow {
-    color: rgba(255, 255, 255, 0.4);
-    display: flex;
-    align-items: center;
-    padding-bottom: 0.35rem;
-  }
-
-  select {
-    padding: 0.5rem;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background-color: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 0.9rem;
-    cursor: pointer;
-  }
-
-  select:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.3);
-  }
-
-  select:focus {
-    outline: none;
-    border-color: #646cff;
-  }
-
-  select:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* Buttons */
-  button {
-    border-radius: 8px;
-    border: 1px solid transparent;
-    padding: 0.6em 1.2em;
-    font-size: 1em;
-    font-weight: 500;
-    font-family: inherit;
-    background-color: #1a1a1a;
-    cursor: pointer;
-    transition: border-color 0.25s, background-color 0.25s;
-  }
-
-  button:hover:not(:disabled) {
-    border-color: #646cff;
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  button.primary {
-    background-color: #646cff;
-    color: white;
-  }
-
-  button.primary:hover:not(:disabled) {
-    background-color: #535bf2;
-  }
-
-  button.danger {
-    background-color: #f44336;
-    color: white;
-  }
-
-  button.danger:hover:not(:disabled) {
-    background-color: #d32f2f;
-  }
-
-  /* Provisional text */
-  .provisional-text {
-    margin-top: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    background-color: rgba(100, 108, 255, 0.05);
-    border-radius: 6px;
-    font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.6);
-    border-left: 3px solid rgba(100, 108, 255, 0.3);
-  }
-
-  .provisional-label {
-    color: rgba(100, 108, 255, 0.7);
-    font-weight: 500;
-  }
-
-  /* Status footer */
-  .status-footer {
-    margin-top: 1.5rem;
-    display: flex;
-    gap: 2rem;
-    font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .status-item strong {
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  /* Model section (collapsible) */
-  .model-section {
-    margin-top: 2rem;
-  }
-
-  .model-section summary {
-    cursor: pointer;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.7);
-    padding: 0.5rem 0;
-    font-size: 0.95rem;
-    user-select: none;
-  }
-
-  .model-section summary:hover {
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  @media (max-width: 768px) {
-    .mode-options {
-      flex-direction: column;
-    }
-
-    .language-row {
-      flex-wrap: wrap;
-    }
-
-    .status-footer {
-      flex-direction: column;
-      gap: 0.5rem;
-    }
+  .error-toast {
+    position: absolute;
+    top: 48px;
+    left: var(--space-md);
+    right: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--danger-dim);
+    color: var(--danger);
+    font-size: var(--font-size-sm);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 77, 77, 0.2);
+    z-index: 10;
+    animation: fadeIn 0.2s ease;
+    pointer-events: none;
   }
 </style>

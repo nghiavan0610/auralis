@@ -29,9 +29,10 @@ export interface SonioxConfig {
   source_language: string;
   target_language: string;
   translation_type: TranslationType;
+  endpoint_delay?: number;
 
   /** Called when finalized original-language text is received. */
-  onOriginal: (text: string, is_final: boolean) => void;
+  onOriginal: (text: string, is_final: boolean, language?: string) => void;
   /** Called when finalized translated text is received. */
   onTranslation: (text: string, is_final: boolean) => void;
   /** Called whenever the connection status changes. */
@@ -371,7 +372,7 @@ export class SonioxClient {
       sample_rate: 16000,
       num_channels: 1,
       enable_endpoint_detection: true,
-      max_endpoint_delay_ms: 1500,
+      max_endpoint_delay_ms: Math.round((this.config.endpoint_delay ?? 1.5) * 1000),
       enable_language_identification: true,
     };
 
@@ -422,12 +423,18 @@ export class SonioxClient {
     let translationText = "";
     let provisionalOriginal = "";
     let hasEndpoint = false;
+    let detectedLanguage: string | undefined;
 
     for (const token of data.tokens) {
       // Special endpoint marker.
       if (token.text === "<end>") {
         hasEndpoint = true;
         continue;
+      }
+
+      // Capture detected language from original tokens.
+      if (token.language && token.translation_status !== "translation") {
+        detectedLanguage = token.language;
       }
 
       switch (token.translation_status) {
@@ -457,14 +464,14 @@ export class SonioxClient {
       }
     }
 
-    // Emit finalized original text.
+    // Emit finalized original text with detected language.
     if (originalText.trim()) {
-      this.config.onOriginal(originalText, true);
+      this.config.onOriginal(originalText, true, detectedLanguage);
     }
 
-    // Emit provisional original text.
+    // Emit provisional original text with detected language.
     if (provisionalOriginal.trim()) {
-      this.config.onOriginal(provisionalOriginal, false);
+      this.config.onOriginal(provisionalOriginal, false, detectedLanguage);
     }
 
     // Emit finalized translation text + store for carryover.

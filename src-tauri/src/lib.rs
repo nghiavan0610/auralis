@@ -1,5 +1,6 @@
 // Library exports for testing and external usage
 
+pub mod audio;
 pub mod state;
 pub mod commands;
 pub mod commands_audio;

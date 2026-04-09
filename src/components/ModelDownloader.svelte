@@ -1,116 +1,195 @@
 <script lang="ts">
-  let expanded = $state(false);
+  import { onMount } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
+
+  let offlineReady = $state(false);
+  let checking = $state(true);
+  let setting = $state(false);
+  let progress = $state(0);
+  let progressMessage = $state('');
+  let progressStep = $state('');
+  let errorMsg = $state('');
+
+  async function checkReady(): Promise<void> {
+    checking = true;
+    try {
+      const result = await invoke<{ venv_exists: boolean; packages_installed: boolean; ready: boolean }>('check_offline_ready');
+      offlineReady = result.ready;
+    } catch {
+      offlineReady = false;
+    }
+    checking = false;
+  }
+
+  async function handleSetup(): Promise<void> {
+    setting = true;
+    progress = 0;
+    progressMessage = 'Starting setup...';
+    progressStep = '';
+    errorMsg = '';
+
+    try {
+      await invoke('setup_offline_environment');
+      offlineReady = true;
+      progressMessage = 'Setup complete!';
+    } catch (err) {
+      errorMsg = `${err}`;
+    }
+    setting = false;
+  }
+
+  onMount(async () => {
+    const unlisten = await listen<{ step: string; message: string; progress: number }>(
+      'offline-setup-progress',
+      (event) => {
+        progressStep = event.payload.step;
+        progressMessage = event.payload.message;
+        progress = event.payload.progress;
+      }
+    );
+
+    await checkReady();
+    return unlisten;
+  });
 </script>
 
-<div class="setup-guide">
-  <h3 onclick={() => expanded = !expanded} class="toggle-header">
-    Setup Guide {expanded ? '▾' : '▸'}
-  </h3>
-
-  {#if expanded}
-    <div class="guide-content">
-      <div class="mode-info">
-        <h4>Cloud Mode (Soniox)</h4>
-        <p>No downloads required. Real-time STT + translation via Soniox WebSocket API (~150-300ms latency).</p>
-        <ol>
-          <li>Get a free API key at <a href="https://soniox.com/" target="_blank" class="link">soniox.com</a></li>
-          <li>Paste the key in the settings above</li>
-          <li>Click Start</li>
-        </ol>
+<div class="offline-setup">
+  {#if checking}
+    <div class="status-line">Checking offline environment...</div>
+  {:else if offlineReady}
+    <div class="status-line ready">
+      <span class="dot green"></span>
+      Offline mode is ready
+    </div>
+  {:else if setting}
+    <div class="progress-section">
+      <div class="progress-header">
+        <span class="step-label">{progressMessage}</span>
+        <span class="progress-pct">{progress}%</span>
       </div>
-
-      <div class="mode-info">
-        <h4>Offline Mode (MLX)</h4>
-        <p>Runs locally with MLX Whisper + Opus-MT. Models are auto-downloaded on first use (~3 GB).</p>
-        <ol>
-          <li>Set up the Python environment:</li>
-          <div class="code-block">
-            <code>python3 -m venv ~/.config/auralis/mlx-env</code><br>
-            <code>source ~/.config/auralis/mlx-env/bin/activate</code><br>
-            <code>pip install mlx-whisper transformers numpy</code>
-          </div>
-          <li>Select "Offline" mode above</li>
-          <li>Click Start — models download automatically on first run</li>
-        </ol>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: {progress}%"></div>
       </div>
+      {#if progressStep}
+        <div class="step-detail">Step: {progressStep}</div>
+      {/if}
+      {#if errorMsg}
+        <div class="error">{errorMsg}</div>
+      {/if}
+    </div>
+  {:else}
+    <div class="setup-prompt">
+      <p>Offline mode requires downloading MLX Whisper and Opus-MT models (~3 GB).</p>
+      <button class="btn-primary" onclick={handleSetup}>
+        Setup Offline Mode
+      </button>
+      {#if errorMsg}
+        <div class="error">{errorMsg}</div>
+      {/if}
     </div>
   {/if}
 </div>
 
 <style>
-  .setup-guide {
-    margin-top: 1rem;
-    padding: 1rem 1.5rem;
-    background-color: rgba(255, 255, 255, 0.03);
-    border-radius: 8px;
+  .offline-setup {
+    padding: var(--space-lg);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
   }
 
-  .toggle-header {
-    font-size: 1rem;
-    cursor: pointer;
-    color: rgba(255, 255, 255, 0.7);
-    margin: 0;
-    user-select: none;
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
   }
 
-  .toggle-header:hover {
-    color: rgba(255, 255, 255, 0.9);
+  .status-line.ready {
+    color: var(--success);
   }
 
-  .guide-content {
-    margin-top: 1rem;
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .dot.green {
+    background-color: var(--success);
+  }
+
+  .progress-section {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: var(--space-xs);
   }
 
-  .mode-info {
-    padding: 1rem;
-    background-color: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
 
-  .mode-info h4 {
-    margin: 0 0 0.5rem 0;
-    font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.9);
+  .step-label {
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
   }
 
-  .mode-info p {
-    margin: 0 0 0.75rem 0;
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
+  .progress-pct {
+    font-size: var(--font-size-xs);
+    color: var(--text-dim);
+    font-family: monospace;
   }
 
-  .mode-info ol {
+  .progress-bar {
+    height: 4px;
+    background: var(--bg-active);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hover), var(--accent));
+    background-size: 200% 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    animation: shimmer 2s linear infinite;
+  }
+
+  .step-detail {
+    font-size: var(--font-size-xs);
+    color: var(--text-dim);
+    font-family: monospace;
+  }
+
+  .setup-prompt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-md);
+    text-align: center;
+  }
+
+  .setup-prompt p {
     margin: 0;
-    padding-left: 1.25rem;
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.7);
+    font-size: var(--font-size-sm);
+    color: var(--text-dim);
+    max-width: 280px;
   }
 
-  .mode-info ol li {
-    margin-bottom: 0.5rem;
-  }
-
-  .code-block {
-    margin: 0.5rem 0 0.75rem;
-    padding: 0.75rem;
-    background-color: rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-    font-size: 0.8rem;
-    color: #a5d6ff;
-    line-height: 1.6;
-  }
-
-  .link {
-    color: #646cff;
-    text-decoration: none;
-  }
-
-  .link:hover {
-    text-decoration: underline;
+  .error {
+    color: var(--danger);
+    font-size: var(--font-size-xs);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--danger-dim);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 77, 77, 0.2);
+    width: 100%;
+    text-align: center;
   }
 </style>

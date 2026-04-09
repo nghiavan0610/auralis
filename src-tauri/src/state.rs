@@ -4,6 +4,7 @@
 //! for the dual-mode (cloud/offline) streaming architecture.
 
 use serde::{Deserialize, Serialize};
+use std::process::{Child, ChildStdin};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::sync::Mutex;
@@ -19,6 +20,48 @@ pub struct Settings {
     pub source_language: String,
     /// Target language code (e.g., "vi")
     pub target_language: String,
+    /// Translation direction: "one_way" or "two_way"
+    #[serde(default = "default_translation_type")]
+    pub translation_type: String,
+    /// Audio source: "microphone", "system", or "both"
+    #[serde(default = "default_audio_source")]
+    pub audio_source: String,
+    /// Window background opacity (0.3–1.0)
+    #[serde(default = "default_opacity")]
+    pub opacity: f64,
+    /// Transcript font size (12–24)
+    #[serde(default = "default_font_size")]
+    pub font_size: u32,
+    /// Maximum number of transcript lines/segments to display (10–200)
+    #[serde(default = "default_max_lines")]
+    pub max_lines: u32,
+    /// Seconds of silence before finalizing a speech segment (VAD endpoint delay, 0.5–3.0)
+    #[serde(default = "default_endpoint_delay")]
+    pub endpoint_delay: f64,
+}
+
+fn default_translation_type() -> String {
+    "one_way".to_string()
+}
+
+fn default_audio_source() -> String {
+    "microphone".to_string()
+}
+
+fn default_opacity() -> f64 {
+    0.88
+}
+
+fn default_font_size() -> u32 {
+    14
+}
+
+fn default_max_lines() -> u32 {
+    100
+}
+
+fn default_endpoint_delay() -> f64 {
+    1.0
 }
 
 impl Default for Settings {
@@ -28,8 +71,20 @@ impl Default for Settings {
             soniox_api_key: String::new(),
             source_language: "en".to_string(),
             target_language: "vi".to_string(),
+            translation_type: default_translation_type(),
+            audio_source: default_audio_source(),
+            opacity: default_opacity(),
+            font_size: default_font_size(),
+            max_lines: default_max_lines(),
+            endpoint_delay: default_endpoint_delay(),
         }
     }
+}
+
+/// Holds the running Python sidecar process and its stdin handle.
+pub struct PipelineState {
+    pub child: Child,
+    pub stdin: ChildStdin,
 }
 
 /// Main application state for the streaming architecture
@@ -42,6 +97,10 @@ pub struct AuralisState {
     pub stream_stop: Arc<AtomicBool>,
     /// User settings (mode, API key, languages)
     pub settings: Arc<Mutex<Settings>>,
+    /// Running Python pipeline process (None when stopped)
+    pub pipeline: Arc<std::sync::Mutex<Option<PipelineState>>>,
+    /// Set to true when the Python pipeline emits {"type": "ready"}
+    pub pipeline_ready: Arc<AtomicBool>,
 }
 
 impl AuralisState {
@@ -51,6 +110,8 @@ impl AuralisState {
             is_streaming: Arc::new(AtomicBool::new(false)),
             stream_stop: Arc::new(AtomicBool::new(false)),
             settings: Arc::new(Mutex::new(Settings::default())),
+            pipeline: Arc::new(std::sync::Mutex::new(None)),
+            pipeline_ready: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -65,8 +126,25 @@ impl AuralisState {
     }
 
     /// Get the current operating mode
+    #[allow(dead_code)]
     pub async fn mode(&self) -> String {
         self.settings.lock().await.mode.clone()
+    }
+
+    /// Get the current audio source
+    #[allow(dead_code)]
+    pub async fn audio_source(&self) -> String {
+        self.settings.lock().await.audio_source.clone()
+    }
+
+    /// Get the current translation type
+    pub async fn translation_type(&self) -> String {
+        self.settings.lock().await.translation_type.clone()
+    }
+
+    /// Get the current endpoint delay (seconds)
+    pub async fn endpoint_delay(&self) -> f64 {
+        self.settings.lock().await.endpoint_delay
     }
 }
 
