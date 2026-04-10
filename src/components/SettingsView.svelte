@@ -74,7 +74,8 @@
   let localTtsRate = $state(1.0);
   let localTtsRateTenths = $state(10);
   let localTtsProvider: 'webspeech' | 'edge' = $state('webspeech');
-  let availableVoices: Array<{ name: string; lang: string; local: boolean }> = $state([]);
+  let voiceDropdownOpen = $state(false);
+  let availableVoices: Array<{ name: string; lang: string; local: boolean; gender?: string }> = $state([]);
   let activeTab = $state<'translation' | 'display' | 'tts' | 'about'>('translation');
 
   // Update checker state
@@ -118,7 +119,15 @@
   $effect(() => {
     if (activeTab === 'tts') {
       tts.setProvider(localTtsProvider);
-      tts.getVoices(localTarget).then((v) => {
+      tts.getVoices().then((v) => {
+        // Sort: target language voices first, then others by lang
+        const target = localTarget.toLowerCase();
+        v.sort((a, b) => {
+          const aMatch = a.lang.toLowerCase() === target ? 0 : 1;
+          const bMatch = b.lang.toLowerCase() === target ? 0 : 1;
+          if (aMatch !== bMatch) return aMatch - bMatch;
+          return a.name.localeCompare(b.name);
+        });
         availableVoices = v;
       });
     }
@@ -189,7 +198,78 @@
       updateStatus = 'up-to-date';
     }
   }
+
+  // --- Voice display helpers ---
+
+  const LANG_FLAGS: Record<string, string> = {
+    en: '🇬🇧', vi: '🇻🇳', es: '🇪🇸', fr: '🇫🇷', de: '🇩🇪',
+    zh: '🇨🇳', ja: '🇯🇵', ko: '🇰🇷', pt: '🇧🇷', ru: '🇷🇺',
+    ar: '🇸🇦', hi: '🇮🇳',
+    // Additional Edge TTS languages
+    it: '🇮🇹', nl: '🇳🇱', pl: '🇵🇱', sv: '🇸🇪', da: '🇩🇰',
+    fi: '🇫🇮', nb: '🇳🇴', tr: '🇹🇷', th: '🇹🇭', id: '🇮🇩',
+    ms: '🇲🇾', tl: '🇵🇭', uk: '🇺🇦', cs: '🇨🇿', sk: '🇸🇰',
+    hu: '🇭🇺', ro: '🇷🇴', bg: '🇧🇬', hr: '🇭🇷', sl: '🇸🇮',
+    et: '🇪🇪', lv: '🇱🇻', lt: '🇱🇹', el: '🇬🇷', he: '🇮🇱',
+    ca: '🇪🇸', eu: '🇪🇸', gl: '🇪🇸', mt: '🇲🇹', ga: '🇮🇪',
+    cy: '🇬🇧', fil: '🇵🇭', te: '🇮🇳', ta: '🇮🇳', mr: '🇮🇳',
+    gu: '🇮🇳', kn: '🇮🇳', ml: '🇮🇳', bn: '🇧🇩', ur: '🇵🇰',
+    sw: '🇰🇪', am: '🇪🇹', jv: '🇮🇩', su: '🇮🇩', ne: '🇳🇵',
+    km: '🇰🇭', lo: '🇱🇦', my: '🇲🇲', ka: '🇬🇪', az: '🇦🇿',
+    uz: '🇺🇿', kk: '🇰🇿', mn: '🇲🇳', ps: '🇦🇫',
+  };
+
+  interface VoiceDisplay {
+    value: string;
+    name: string;
+    gender: string;
+    flag: string;
+  }
+
+  function getFlag(lang: string, name: string): string {
+    try {
+      const code = (lang ?? '').toLowerCase();
+      if (LANG_FLAGS[code]) return LANG_FLAGS[code];
+      const prefix = (name ?? '').split('-')[0]?.toLowerCase() ?? '';
+      return LANG_FLAGS[prefix] ?? '🌐';
+    } catch {
+      return '🌐';
+    }
+  }
+
+  function parseVoiceDisplay(voice: { name: string; lang: string; local: boolean; gender?: string }): VoiceDisplay {
+    try {
+      const flag = getFlag(voice.lang, voice.name);
+      const gender = voice.gender ?? '—';
+      let displayName = voice.name ?? '';
+      const neuralMatch = displayName.match(/([A-Z][a-zA-Z]+)(?:Multilingual)?Neural$/);
+      if (neuralMatch) {
+        displayName = neuralMatch[1];
+      }
+      return { value: voice.name, name: displayName, gender, flag };
+    } catch {
+      return { value: voice.name ?? '', name: voice.name ?? '', gender: '—', flag: '🌐' };
+    }
+  }
+
+  function toggleVoiceDropdown() {
+    voiceDropdownOpen = !voiceDropdownOpen;
+  }
+
+  function selectVoice(name: string) {
+    localTtsVoice = name;
+    voiceDropdownOpen = false;
+  }
+
+  function handleVoiceClickOutside(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.voice-dropdown-container')) {
+      voiceDropdownOpen = false;
+    }
+  }
 </script>
+
+<svelte:window onclick={handleVoiceClickOutside} />
 
 <div class="settings-view">
   <!-- Header (in drag region) -->
@@ -455,11 +535,12 @@
 
     {:else if activeTab === 'tts'}
       <div class="settings-section">
-        <!-- Toggle card -->
+        <!-- Enable toggle -->
+        <div class="section-label">Text-to-Speech</div>
+        <p class="section-desc">When enabled, translated text is automatically spoken aloud.</p>
         <div class="toggle-card">
           <div class="toggle-card-info">
             <span class="toggle-card-label">Speak translations aloud</span>
-            <span class="toggle-card-desc">{localTtsProvider === 'edge' ? 'Cloud voices via Edge TTS. Requires internet.' : "Uses your system's built-in voices. Works offline."}</span>
           </div>
           <button
             class="toggle"
@@ -472,29 +553,105 @@
           </button>
         </div>
 
-        <!-- Provider selector -->
-        <div class="slider-card">
-          <div class="slider-card-header">
-            <span class="slider-card-label">Provider</span>
-          </div>
-          <select bind:value={localTtsProvider} disabled={isTranslating || !localTtsEnabled}>
-            <option value="webspeech">Web Speech (offline)</option>
-            <option value="edge">Edge TTS (cloud, 40+ languages)</option>
-          </select>
+        <!-- Provider cards -->
+        <div class="section-label" style="margin-top: var(--space-lg);">Provider</div>
+        <p class="section-desc">Choose between offline system voices or cloud-based Edge TTS.</p>
+        <div class="mode-cards">
+          <label class="mode-card" class:active={localTtsProvider === 'webspeech'}>
+            <input type="radio" name="tts-provider" value="webspeech" bind:group={localTtsProvider} disabled={isTranslating || !localTtsEnabled} />
+            <div class="mode-card-content">
+              <span class="mode-name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                </svg>
+                Web Speech
+              </span>
+              <span class="mode-desc">Offline, system voices</span>
+            </div>
+          </label>
+          <label class="mode-card" class:active={localTtsProvider === 'edge'}>
+            <input type="radio" name="tts-provider" value="edge" bind:group={localTtsProvider} disabled={isTranslating || !localTtsEnabled} />
+            <div class="mode-card-content">
+              <span class="mode-name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+                Edge TTS
+              </span>
+              <span class="mode-desc">Cloud, 40+ languages, free</span>
+            </div>
+          </label>
         </div>
 
         <!-- Voice selector -->
-        <div class="slider-card">
-          <div class="slider-card-header">
-            <span class="slider-card-label">Voice</span>
+        <div class="section-label" style="margin-top: var(--space-lg);">Voice</div>
+        {#if localTtsProvider === 'edge'}
+          <p class="section-desc">Microsoft Neural voices for high-quality speech.</p>
+          <div class="voice-dropdown-container">
+            <!-- Trigger -->
+            <button
+              class="voice-trigger"
+              onclick={toggleVoiceDropdown}
+              disabled={isTranslating || !localTtsEnabled}
+            >
+              {#if localTtsVoice}
+                {@const selected = availableVoices.find(v => v.name === localTtsVoice)}
+                {#if selected}
+                  {@const display = parseVoiceDisplay(selected)}
+                  <span class="voice-trigger-text">
+                    <span class="voice-trigger-flag">{display.flag}</span>
+                    {display.name} — {display.gender}
+                  </span>
+                {:else}
+                  <span class="voice-trigger-text">{localTtsVoice}</span>
+                {/if}
+              {:else}
+                <span class="voice-trigger-text voice-trigger-placeholder">Auto (best for language)</span>
+              {/if}
+              <svg class="voice-trigger-arrow" class:open={voiceDropdownOpen} width="10" height="6" viewBox="0 0 10 6" fill="none">
+                <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+
+            <!-- Dropdown list -->
+            {#if voiceDropdownOpen && !isTranslating && localTtsEnabled}
+              <div class="voice-dropdown">
+                <button
+                  class="voice-option"
+                  class:active={localTtsVoice === ''}
+                  onclick={() => selectVoice('')}
+                >
+                  <span class="voice-option-check">{localTtsVoice === '' ? '✓' : ''}</span>
+                  <span class="voice-option-name">Auto</span>
+                  <span class="voice-option-detail">Best for language</span>
+                </button>
+                {#each availableVoices as voice (voice.name)}
+                  <button
+                    class="voice-option"
+                    class:active={localTtsVoice === voice.name}
+                    onclick={() => selectVoice(voice.name)}
+                  >
+                    <span class="voice-option-check">{localTtsVoice === voice.name ? '✓' : ''}</span>
+                    <span class="voice-option-name">{parseVoiceDisplay(voice).name}</span>
+                    <span class="voice-option-detail">— {voice.gender ?? '—'}</span>
+                    <span class="voice-option-flag">{getFlag(voice.lang ?? '', voice.name ?? '')}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
-          <select bind:value={localTtsVoice} disabled={isTranslating || !localTtsEnabled}>
-            <option value="">Auto (best for language)</option>
-            {#each availableVoices as voice}
-              <option value={voice.name}>{voice.name} ({voice.lang}){voice.local ? '' : ' ☁'}</option>
-            {/each}
-          </select>
-        </div>
+        {:else}
+          <p class="section-desc">Web Speech uses your system's default voice. Switch to Edge TTS for voice selection.</p>
+          <div class="voice-dropdown-container">
+            <button class="voice-trigger" disabled>
+              <span class="voice-trigger-text voice-trigger-placeholder">System default voice</span>
+              <svg class="voice-trigger-arrow" width="10" height="6" viewBox="0 0 10 6" fill="none">
+                <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        {/if}
 
         <!-- Speed slider -->
         <div class="slider-card">
@@ -715,7 +872,7 @@
   .mode-card-content {
     padding: var(--space-md);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -845,7 +1002,7 @@
     justify-content: space-between;
     padding: var(--space-md);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     background: var(--bg-secondary);
   }
 
@@ -981,19 +1138,6 @@
   }
 
   /* Toggle switch */
-  .toggle-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm) 0;
-  }
-
-  .toggle-label {
-    font-size: var(--font-size-sm);
-    color: var(--text-primary);
-  }
-
-  /* Toggle card */
   .toggle-card {
     display: flex;
     align-items: center;
@@ -1009,27 +1153,16 @@
     border-color: var(--border-hover);
   }
 
-  .toggle-card-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
   .toggle-card-label {
     font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--text-primary);
   }
 
-  .toggle-card-desc {
-    font-size: var(--font-size-xs);
-    color: var(--text-dim);
-  }
-
   .toggle {
-    width: 40px;
-    height: 22px;
-    border-radius: 11px;
+    width: 44px;
+    height: 24px;
+    border-radius: 12px;
     border: none;
     background: rgba(255, 255, 255, 0.1);
     position: relative;
@@ -1044,8 +1177,8 @@
 
   .toggle-thumb {
     position: absolute;
-    top: 2px;
-    left: 2px;
+    top: 3px;
+    left: 3px;
     width: 18px;
     height: 18px;
     border-radius: 50%;
@@ -1055,7 +1188,7 @@
   }
 
   .toggle.active .toggle-thumb {
-    transform: translateX(18px);
+    transform: translateX(20px);
   }
 
   .toggle:disabled {
@@ -1063,31 +1196,127 @@
     cursor: default;
   }
 
-  /* Voice selector */
-  .slider-card select {
+  /* Voice dropdown */
+  .voice-dropdown-container {
+    position: relative;
+    z-index: 50;
+  }
+
+  .voice-trigger {
     width: 100%;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-radius: 12px;
     border: 1px solid var(--border);
-    background: var(--bg-primary);
+    background: var(--bg-solid);
     color: var(--text-primary);
     font-size: var(--font-size-sm);
     font-family: var(--font-family);
     cursor: pointer;
     outline: none;
-    transition: border-color 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
-  .slider-card select:hover {
+  .voice-trigger:hover {
     border-color: var(--border-hover);
   }
 
-  .slider-card select:focus {
+  .voice-trigger:focus {
     border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 140, 255, 0.1);
   }
 
-  .slider-card select:disabled {
+  .voice-trigger:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+
+  .voice-trigger-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .voice-trigger-flag {
+    font-size: 16px;
+  }
+
+  .voice-trigger-placeholder {
+    color: var(--text-dim);
+  }
+
+  .voice-trigger-arrow {
+    flex-shrink: 0;
+    color: var(--text-dim);
+    transition: transform 0.2s ease;
+  }
+
+  .voice-trigger-arrow.open {
+    transform: rotate(180deg);
+  }
+
+  .voice-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 320px;
+    overflow-y: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-solid);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    z-index: 50;
+    padding: 4px;
+  }
+
+  .voice-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+  }
+
+  .voice-option:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .voice-option.active {
+    background: var(--accent-dim);
+  }
+
+  .voice-option-check {
+    width: 14px;
+    flex-shrink: 0;
+    text-align: center;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .voice-option-name {
+    font-weight: 500;
+  }
+
+  .voice-option-detail {
+    color: var(--text-dim);
+  }
+
+  .voice-option-flag {
+    margin-left: auto;
+    font-size: 16px;
+    flex-shrink: 0;
   }
 </style>

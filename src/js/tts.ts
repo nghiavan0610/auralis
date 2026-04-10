@@ -13,6 +13,7 @@ export interface TTSVoice {
   name: string;
   lang: string;
   local: boolean;
+  gender?: string;
 }
 
 interface EdgeVoice {
@@ -82,11 +83,7 @@ class TTSEngine {
     this.currentUtterance = null;
 
     // Stop Edge TTS audio
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      this.currentAudio.src = '';
-      this.currentAudio = null;
-    }
+    this.cleanupAudio();
   }
 
   /** Get available voices for the current provider, optionally filtered by language. */
@@ -147,17 +144,13 @@ class TTSEngine {
   }
 
   private async getWebSpeechVoices(lang?: string): Promise<TTSVoice[]> {
-    await this.voicesLoaded;
-
-    let filtered = this.voices;
-    if (lang) {
-      const prefix = lang.toLowerCase();
-      filtered = this.voices.filter((v) =>
-        v.lang.toLowerCase().startsWith(prefix)
-      );
+    // Re-fetch voices — WKWebView may load them after initial call
+    if (this.synth && this.voices.length === 0) {
+      this.voices = this.synth.getVoices();
     }
 
-    return filtered.map((v) => ({
+    // Show all voices (Web Speech may have limited voices per language)
+    return this.voices.map((v) => ({
       name: v.name,
       lang: v.lang,
       local: v.localService,
@@ -188,6 +181,9 @@ class TTSEngine {
   // --- Edge TTS ---
 
   private async speakEdge(text: string, lang: string): Promise<void> {
+    // Clean up any previous audio
+    this.cleanupAudio();
+
     try {
       const base64Audio = await invoke<string>('edge_tts_synthesize', {
         text,
@@ -196,12 +192,32 @@ class TTSEngine {
         lang,
       });
 
+      // Check if stop() was called while waiting for synthesis
+      if (!this.currentAudio && this._provider !== 'edge') return;
+
       const audio = new Audio(`data:audio/mp3;base64,${base64Audio}`);
       this.currentAudio = audio;
-      await audio.play();
+
+      try {
+        await audio.play();
+      } catch (playErr: unknown) {
+        // AbortError is expected when stop() is called during playback
+        if (playErr instanceof DOMException && playErr.name === 'AbortError') return;
+        throw playErr;
+      }
     } catch (err) {
       console.warn('[Auralis] Edge TTS failed, falling back to Web Speech:', err);
+      this.cleanupAudio();
       this.speakWebSpeech(text, lang);
+    }
+  }
+
+  private cleanupAudio(): void {
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio.removeAttribute('src');
+      this.currentAudio.load(); // Release any buffered data
+      this.currentAudio = null;
     }
   }
 
@@ -214,6 +230,7 @@ class TTSEngine {
         name: v.name,
         lang: v.lang,
         local: true, // Edge voices are served locally after synthesis
+        gender: v.gender,
       }));
     } catch (err) {
       console.warn('[Auralis] Failed to list Edge voices:', err);

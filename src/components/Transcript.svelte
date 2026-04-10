@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { onDestroy } from 'svelte';
   import type { Segment } from '../types';
   import { getLangLabel, getLangFlag } from '../js/lang';
 
@@ -25,6 +26,8 @@
   let rightContainer: HTMLDivElement | undefined = $state();
   let leftCopied = $state(false);
   let rightCopied = $state(false);
+  let leftCopyTimer: ReturnType<typeof setTimeout> | null = null;
+  let rightCopyTimer: ReturnType<typeof setTimeout> | null = null;
 
   function getOriginalText(): string {
     return segments.map(s => s.original).filter(Boolean).join('\n');
@@ -39,7 +42,8 @@
     if (!text) return;
     await navigator.clipboard.writeText(text);
     leftCopied = true;
-    setTimeout(() => { leftCopied = false; }, 1500);
+    if (leftCopyTimer) clearTimeout(leftCopyTimer);
+    leftCopyTimer = setTimeout(() => { leftCopied = false; }, 1500);
   }
 
   async function copyRight() {
@@ -47,7 +51,8 @@
     if (!text) return;
     await navigator.clipboard.writeText(text);
     rightCopied = true;
-    setTimeout(() => { rightCopied = false; }, 1500);
+    if (rightCopyTimer) clearTimeout(rightCopyTimer);
+    rightCopyTimer = setTimeout(() => { rightCopied = false; }, 1500);
   }
 
   async function scrollToBottom(el: HTMLDivElement | undefined) {
@@ -78,6 +83,11 @@
 
   const isEmpty = $derived(segments.length === 0 && !provisionalText);
   const isTwoWay = $derived(translationType === 'two_way');
+
+  onDestroy(() => {
+    if (leftCopyTimer) clearTimeout(leftCopyTimer);
+    if (rightCopyTimer) clearTimeout(rightCopyTimer);
+  });
 </script>
 
 <div class="transcript" style="--entry-font-size: {fontSize}px">

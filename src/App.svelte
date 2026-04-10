@@ -590,7 +590,12 @@
     border-radius: var(--radius-sm);
     border: 1px solid rgba(255, 77, 77, 0.2);
     z-index: 10;
-    animation: fadeIn 0.2s ease;
+    animation: fadeIn 0.2s ease, fadeOut 0.3s ease 4.7s forwards;
     pointer-events: none;
+  }
+
+  @keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-8px); }
   }
 </style>

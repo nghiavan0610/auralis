@@ -1,9 +1,11 @@
-//! Curated list of Edge TTS voices for supported languages.
+//! Edge TTS voice listing.
 //!
-//! Each voice has a name, language code, and gender.
-//! These are high-quality Neural voices from Microsoft.
+//! Fetches the full voice catalog from Microsoft's API at runtime.
+//! Falls back to a curated list if the network request fails.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EdgeVoice {
@@ -11,6 +13,22 @@ pub struct EdgeVoice {
     pub lang: String,
     pub gender: String,
 }
+
+/// Raw voice entry from Microsoft's API
+#[derive(Debug, Deserialize)]
+struct ApiVoice {
+    #[serde(rename = "ShortName")]
+    short_name: String,
+    #[serde(rename = "Locale")]
+    locale: String,
+    #[serde(rename = "Gender")]
+    gender: String,
+}
+
+const VOICES_URL: &str = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+
+/// Cached voice list (fetched once, reused)
+static VOICE_CACHE: Lazy<Mutex<Option<Vec<EdgeVoice>>>> = Lazy::new(|| Mutex::new(None));
 
 /// Get the default Edge TTS voice for a given language code.
 pub fn default_voice_for_lang(lang: &str) -> Option<&'static str> {
@@ -31,8 +49,92 @@ pub fn default_voice_for_lang(lang: &str) -> Option<&'static str> {
     }
 }
 
-/// Get all available Edge TTS voices.
-pub fn all_voices() -> Vec<EdgeVoice> {
+/// Languages we support in the app (STT + TTS consistency).
+const SUPPORTED_LANGS: &[&str] = &[
+    "en", "vi", "es", "fr", "de", "zh", "ja", "ko", "pt", "ru", "ar", "hi",
+];
+
+/// Get all available Edge TTS voices, filtered to supported languages only.
+///
+/// On first call, fetches from Microsoft's API and caches the result.
+/// Falls back to a curated list if the network request fails.
+pub async fn all_voices() -> Vec<EdgeVoice> {
+    // Check cache first
+    {
+        let cache = VOICE_CACHE.lock().unwrap();
+        if let Some(ref voices) = *cache {
+            return voices.clone();
+        }
+    }
+
+    // Fetch from API
+    match fetch_voices_from_api().await {
+        Ok(voices) => {
+            // Filter to supported languages only
+            let filtered: Vec<EdgeVoice> = voices
+                .into_iter()
+                .filter(|v| SUPPORTED_LANGS.contains(&v.lang.as_str()))
+                .collect();
+            tracing::info!("Edge TTS: {} voices for supported languages", filtered.len());
+            let mut cache = VOICE_CACHE.lock().unwrap();
+            cache.get_or_insert(filtered).clone()
+        }
+        Err(err) => {
+            tracing::warn!("Edge TTS: failed to fetch voices from API ({}), using fallback", err);
+            let fallback = fallback_voices();
+            let mut cache = VOICE_CACHE.lock().unwrap();
+            cache.get_or_insert(fallback).clone()
+        }
+    }
+}
+
+async fn fetch_voices_from_api() -> Result<Vec<EdgeVoice>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let resp = client
+        .get(VOICES_URL)
+        .header("User-Agent", "Mozilla/5.0")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    let api_voices: Vec<ApiVoice> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    // Filter to Neural voices only and map to our struct
+    let voices: Vec<EdgeVoice> = api_voices
+        .into_iter()
+        .filter(|v| v.short_name.contains("Neural"))
+        .map(|v| EdgeVoice {
+            name: v.short_name,
+            lang: locale_to_lang(&v.locale),
+            gender: v.gender,
+        })
+        .collect();
+
+    Ok(voices)
+}
+
+/// Convert full locale like "en-US" to short language code "en".
+fn locale_to_lang(locale: &str) -> String {
+    locale
+        .split('-')
+        .next()
+        .unwrap_or(locale)
+        .to_lowercase()
+}
+
+/// Fallback curated list used when the API is unreachable.
+fn fallback_voices() -> Vec<EdgeVoice> {
     vec![
         // English
         EdgeVoice { name: "en-US-EmmaMultilingualNeural".into(), lang: "en".into(), gender: "Female".into() },

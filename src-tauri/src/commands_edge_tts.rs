@@ -25,7 +25,7 @@ pub async fn edge_tts_synthesize(
 pub async fn edge_tts_list_voices(
     lang: Option<String>,
 ) -> Result<Vec<edge_tts::voices::EdgeVoice>, String> {
-    let mut voices = edge_tts::voices::all_voices();
+    let mut voices = edge_tts::voices::all_voices().await;
     if let Some(lang) = lang {
         let prefix = lang.to_lowercase();
         voices.retain(|v| v.lang.to_lowercase().starts_with(&prefix));
