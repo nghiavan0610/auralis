@@ -27,8 +27,9 @@
   let ttsEnabled = $state(false);
   let ttsVoice = $state('');
   let ttsRate = $state(1.0);
-  let ttsProvider: 'webspeech' | 'edge' | 'google' = $state('webspeech');
+  let ttsProvider: 'webspeech' | 'edge' | 'google' | 'elevenlabs' = $state('webspeech');
   let googleApiKey = $state('');
+  let elevenlabsApiKey = $state('');
   let sonioxApiKey = $state('');
   let isTranslating = $state(false);
   let statusMessage = $state('Ready');
@@ -161,6 +162,7 @@
         tts_rate?: number;
         tts_provider?: string;
         google_api_key?: string;
+        elevenlabs_api_key?: string;
       }>('get_settings');
 
       if (settings.mode === 'cloud' || settings.mode === 'offline') {
@@ -185,8 +187,9 @@
       ttsEnabled = settings.tts_enabled ?? false;
       ttsVoice = settings.tts_voice ?? '';
       ttsRate = settings.tts_rate ?? 1.0;
-      ttsProvider = (settings.tts_provider as 'webspeech' | 'edge' | 'google') ?? 'webspeech';
+      ttsProvider = (settings.tts_provider as 'webspeech' | 'edge' | 'google' | 'elevenlabs') ?? 'webspeech';
       googleApiKey = settings.google_api_key ?? '';
+      elevenlabsApiKey = settings.elevenlabs_api_key ?? '';
       sonioxApiKey = settings.soniox_api_key;
       sourceLanguage = settings.source_language;
       targetLanguage = settings.target_language;
@@ -213,6 +216,7 @@
         tts_rate: ttsRate,
         tts_provider: ttsProvider,
         google_api_key: googleApiKey,
+        elevenlabs_api_key: elevenlabsApiKey,
       },
     });
   }
@@ -371,12 +375,14 @@
     tts_enabled: boolean;
     tts_voice: string;
     tts_rate: number;
-    tts_provider: 'webspeech' | 'edge' | 'google';
+    tts_provider: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
     google_api_key: string;
+    elevenlabs_api_key: string;
   }) {
     mode = settings.mode;
     sonioxApiKey = settings.soniox_api_key;
     googleApiKey = settings.google_api_key;
+    elevenlabsApiKey = settings.elevenlabs_api_key;
     sourceLanguage = settings.source_language;
     targetLanguage = settings.target_language;
     translationType = settings.translation_type;

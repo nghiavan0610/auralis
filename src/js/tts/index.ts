@@ -10,6 +10,7 @@ import type { TTSProviderName, TTSVoice, TTSProviderAdapter } from './types';
 import { WebSpeechProvider } from './webspeech';
 import { EdgeTTSProvider } from './edge';
 import { GoogleTTSProvider } from './google';
+import { ElevenLabsTTSProvider } from './elevenlabs';
 
 class TTSEngine {
   private _provider: TTSProviderName = 'webspeech';
@@ -25,6 +26,7 @@ class TTSEngine {
       webspeech: new WebSpeechProvider(),
       edge: new EdgeTTSProvider(),
       google: new GoogleTTSProvider(),
+      elevenlabs: new ElevenLabsTTSProvider(),
     };
   }
 

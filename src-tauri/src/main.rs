@@ -10,8 +10,10 @@ mod commands_settings;
 mod commands_pipeline;
 mod commands_edge_tts;
 mod commands_google_tts;
+mod commands_elevenlabs_tts;
 mod edge_tts;
 mod google_tts;
+mod elevenlabs_tts;
 
 use state::AuralisState;
 
@@ -22,6 +24,7 @@ use commands_settings::*;
 use commands_pipeline::*;
 use commands_edge_tts::*;
 use commands_google_tts::*;
+use commands_elevenlabs_tts::*;
 
 // Import Manager trait for window access
 use tauri::Manager;
@@ -71,6 +74,9 @@ fn main() {
             // Google Cloud TTS
             google_tts_synthesize,
             google_tts_list_voices,
+            // ElevenLabs TTS
+            elevenlabs_tts_synthesize,
+            elevenlabs_tts_list_voices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

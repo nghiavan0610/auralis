@@ -81,6 +81,11 @@ pub async fn save_settings(
         crate::google_tts::voices::invalidate_cache();
     }
 
+    // Invalidate ElevenLabs voice cache if API key changed
+    if old_settings.elevenlabs_api_key != settings.elevenlabs_api_key {
+        crate::elevenlabs_tts::voices::invalidate_cache();
+    }
+
     tracing::info!(
         mode = %settings.mode,
         source = %settings.source_language,

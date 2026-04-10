@@ -20,13 +20,15 @@
     ttsEnabled = false,
     ttsVoice = '',
     ttsRate = 1.0,
-    ttsProvider = 'webspeech' as 'webspeech' | 'edge' | 'google',
+    ttsProvider = 'webspeech' as 'webspeech' | 'edge' | 'google' | 'elevenlabs',
+    elevenlabsApiKey = '',
     onSave,
     onBack,
   }: {
     mode?: OperatingMode;
     sonioxApiKey?: string;
     googleApiKey?: string;
+    elevenlabsApiKey?: string;
     sourceLanguage?: string;
     targetLanguage?: string;
     translationType?: TranslationType;
@@ -39,7 +41,7 @@
     ttsEnabled?: boolean;
     ttsVoice?: string;
     ttsRate?: number;
-    ttsProvider?: 'webspeech' | 'edge' | 'google';
+    ttsProvider?: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -54,8 +56,9 @@
       tts_enabled: boolean;
       tts_voice: string;
       tts_rate: number;
-      tts_provider: 'webspeech' | 'edge' | 'google';
+      tts_provider: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
       google_api_key: string;
+      elevenlabs_api_key: string;
     }) => void;
     onBack: () => void;
   } = $props();
@@ -76,9 +79,12 @@
   let localTtsVoice = $state('');
   let localTtsRate = $state(1.0);
   let localTtsRateTenths = $state(10);
-  let localTtsProvider: 'webspeech' | 'edge' | 'google' = $state('webspeech');
+  let localTtsProvider: 'webspeech' | 'edge' | 'google' | 'elevenlabs' = $state('webspeech');
   let localGoogleApiKey = $state('');
+  let localElevenlabsApiKey = $state('');
   let voiceDropdownOpen = $state(false);
+  let modeDropdownOpen = $state(false);
+  let providerDropdownOpen = $state(false);
   let availableVoices: Array<{ name: string; lang: string; local: boolean; gender?: string }> = $state([]);
   let activeTab = $state<'translation' | 'display' | 'tts' | 'about'>('translation');
 
@@ -111,6 +117,7 @@
     localTtsRateTenths = Math.round(ttsRate * 10);
     localTtsProvider = ttsProvider;
     localGoogleApiKey = googleApiKey;
+    localElevenlabsApiKey = elevenlabsApiKey;
   });
 
   // Load version when About tab is opened
@@ -158,6 +165,7 @@
 
   // Validation state
   let googleApiKeyError = $state(false);
+  let elevenlabsApiKeyError = $state(false);
   let sonioxApiKeyError = $state(false);
 
   function handleSave() {
@@ -183,6 +191,17 @@
     }
     googleApiKeyError = false;
 
+    // Validate: ElevenLabs TTS requires an API key
+    if (localTtsProvider === 'elevenlabs' && !localElevenlabsApiKey.trim()) {
+      elevenlabsApiKeyError = true;
+      activeTab = 'tts';
+      setTimeout(() => {
+        document.getElementById('elevenlabs-api-key')?.focus();
+      }, 50);
+      return;
+    }
+    elevenlabsApiKeyError = false;
+
     onSave({
       mode: localMode,
       soniox_api_key: localApiKey,
@@ -199,6 +218,7 @@
       tts_rate: localTtsRate,
       tts_provider: localTtsProvider,
       google_api_key: localGoogleApiKey,
+      elevenlabs_api_key: localElevenlabsApiKey,
     });
   }
 
@@ -287,8 +307,48 @@
     }
   }
 
+  // Dropdown position for fixed positioning
+  let dropdownPos = $state({ top: 0, left: 0, width: 0 });
+
+  function positionDropdown(containerClass: string) {
+    const trigger = document.querySelector(`${containerClass} .voice-trigger`) as HTMLElement;
+    if (trigger) {
+      const rect = trigger.getBoundingClientRect();
+      dropdownPos = { top: rect.bottom + 4, left: rect.left, width: rect.width };
+    }
+  }
+
+  function closeAllDropdowns() {
+    modeDropdownOpen = false;
+    providerDropdownOpen = false;
+    voiceDropdownOpen = false;
+  }
+
+  function toggleModeDropdown() {
+    const opening = !modeDropdownOpen;
+    closeAllDropdowns();
+    if (opening) {
+      modeDropdownOpen = true;
+      positionDropdown('.mode-dropdown-container');
+    }
+  }
+
+  function toggleProviderDropdown() {
+    const opening = !providerDropdownOpen;
+    closeAllDropdowns();
+    if (opening) {
+      providerDropdownOpen = true;
+      positionDropdown('.provider-dropdown-container');
+    }
+  }
+
   function toggleVoiceDropdown() {
-    voiceDropdownOpen = !voiceDropdownOpen;
+    const opening = !voiceDropdownOpen;
+    closeAllDropdowns();
+    if (opening) {
+      voiceDropdownOpen = true;
+      positionDropdown('.voice-dropdown-container');
+    }
   }
 
   function selectVoice(name: string) {
@@ -296,15 +356,21 @@
     voiceDropdownOpen = false;
   }
 
-  function handleVoiceClickOutside(e: MouseEvent) {
+  function handleGlobalClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
-    if (!target.closest('.voice-dropdown-container')) {
-      voiceDropdownOpen = false;
+    if (!target.closest('.voice-dropdown-container') && !target.closest('.mode-dropdown-container') && !target.closest('.provider-dropdown-container')) {
+      closeAllDropdowns();
     }
   }
+
+  function handleScroll() {
+    closeAllDropdowns();
+  }
+
+  let tabContentEl: HTMLElement | undefined = $state();
 </script>
 
-<svelte:window onclick={handleVoiceClickOutside} />
+<svelte:window onclick={handleGlobalClick} />
 
 <div class="settings-view">
   <!-- Header (in drag region) -->
@@ -337,27 +403,52 @@
   </div>
 
   <!-- Tab content -->
-  <div class="tab-content">
+  <div class="tab-content" bind:this={tabContentEl} onscroll={handleScroll}>
     {#if activeTab === 'translation'}
       <div class="settings-section">
         <!-- 1. Mode selector -->
         <div class="section-label">Translation Mode</div>
         <p class="section-desc">Choose how speech is recognized and translated.</p>
-        <div class="mode-cards">
-          <label class="mode-card" class:active={localMode === 'cloud'}>
-            <input type="radio" name="mode" value="cloud" bind:group={localMode} disabled={isTranslating} />
-            <div class="mode-card-content">
-              <span class="mode-name">Cloud (Soniox)</span>
-              <span class="mode-desc">~150ms latency, requires internet</span>
+        <div class="voice-dropdown-container mode-dropdown-container" class:open={modeDropdownOpen}>
+          <button
+            class="voice-trigger"
+            onclick={toggleModeDropdown}
+            disabled={isTranslating}
+          >
+            <span class="voice-trigger-text">
+              {localMode === 'cloud' ? 'Cloud (Soniox)' : 'Offline (MLX)'}
+            </span>
+            <svg class="voice-trigger-arrow" class:open={modeDropdownOpen} width="10" height="6" viewBox="0 0 10 6" fill="none">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+
+          {#if modeDropdownOpen && !isTranslating}
+            <div class="voice-dropdown" style="top:{dropdownPos.top}px;left:{dropdownPos.left}px;width:{dropdownPos.width}px">
+              <button
+                class="voice-option"
+                class:active={localMode === 'cloud'}
+                onclick={() => { localMode = 'cloud'; modeDropdownOpen = false; }}
+              >
+                <span class="voice-option-check">{localMode === 'cloud' ? '✓' : ''}</span>
+                <div class="voice-option-content">
+                  <span class="voice-option-name">Cloud (Soniox)</span>
+                  <span class="voice-option-desc">~150ms latency, requires internet</span>
+                </div>
+              </button>
+              <button
+                class="voice-option"
+                class:active={localMode === 'offline'}
+                onclick={() => { localMode = 'offline'; modeDropdownOpen = false; }}
+              >
+                <span class="voice-option-check">{localMode === 'offline' ? '✓' : ''}</span>
+                <div class="voice-option-content">
+                  <span class="voice-option-name">Offline (MLX)</span>
+                  <span class="voice-option-desc">~1s latency, works offline</span>
+                </div>
+              </button>
             </div>
-          </label>
-          <label class="mode-card" class:active={localMode === 'offline'}>
-            <input type="radio" name="mode" value="offline" bind:group={localMode} disabled={isTranslating} />
-            <div class="mode-card-content">
-              <span class="mode-name">Offline (MLX)</span>
-              <span class="mode-desc">~1s latency, works offline</span>
-            </div>
-          </label>
+          {/if}
         </div>
 
         <!-- 2. Mode-specific setup (right after mode choice) -->
@@ -596,49 +687,79 @@
           </button>
         </div>
 
-        <!-- Provider cards -->
+        <!-- Provider dropdown -->
         <div class="section-label" style="margin-top: var(--space-lg);">Provider</div>
         <p class="section-desc">Choose between offline system voices or cloud-based TTS providers.</p>
-        <div class="provider-grid">
-          <label class="mode-card" class:active={localTtsProvider === 'webspeech'}>
-            <input type="radio" name="tts-provider" value="webspeech" bind:group={localTtsProvider} disabled={isTranslating || !localTtsEnabled} />
-            <div class="mode-card-content">
-              <span class="mode-name">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                </svg>
+        <div class="voice-dropdown-container provider-dropdown-container" class:open={providerDropdownOpen}>
+          <button
+            class="voice-trigger"
+            onclick={toggleProviderDropdown}
+            disabled={isTranslating || !localTtsEnabled}
+          >
+            <span class="voice-trigger-text">
+              {#if localTtsProvider === 'webspeech'}
                 Web Speech
-              </span>
-              <span class="mode-desc">Offline, system voices</span>
-            </div>
-          </label>
-          <label class="mode-card" class:active={localTtsProvider === 'edge'}>
-            <input type="radio" name="tts-provider" value="edge" bind:group={localTtsProvider} disabled={isTranslating || !localTtsEnabled} />
-            <div class="mode-card-content">
-              <span class="mode-name">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
-                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-                </svg>
+              {:else if localTtsProvider === 'edge'}
                 Edge TTS
-              </span>
-              <span class="mode-desc">Cloud, 40+ languages, free</span>
-            </div>
-          </label>
-          <label class="mode-card provider-card-full" class:active={localTtsProvider === 'google'}>
-            <input type="radio" name="tts-provider" value="google" bind:group={localTtsProvider} disabled={isTranslating || !localTtsEnabled} />
-            <div class="mode-card-content">
-              <span class="mode-name">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
-                  <path d="M2 12h20"/>
-                  <path d="M12 2c2.5 2.8 4 6.2 4 10s-1.5 7.2-4 10c-2.5-2.8-4-6.2-4-10s1.5-7.2 4-10z"/>
-                </svg>
+              {:else if localTtsProvider === 'google'}
                 Google Cloud TTS
-              </span>
-              <span class="mode-desc">WaveNet voices, requires API key</span>
+              {:else}
+                ElevenLabs
+              {/if}
+            </span>
+            <svg class="voice-trigger-arrow" class:open={providerDropdownOpen} width="10" height="6" viewBox="0 0 10 6" fill="none">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+
+          {#if providerDropdownOpen && !isTranslating && localTtsEnabled}
+            <div class="voice-dropdown" style="top:{dropdownPos.top}px;left:{dropdownPos.left}px;width:{dropdownPos.width}px">
+              <button
+                class="voice-option"
+                class:active={localTtsProvider === 'webspeech'}
+                onclick={() => { localTtsProvider = 'webspeech'; providerDropdownOpen = false; }}
+              >
+                <span class="voice-option-check">{localTtsProvider === 'webspeech' ? '✓' : ''}</span>
+                <div class="voice-option-content">
+                  <span class="voice-option-name">Web Speech</span>
+                  <span class="voice-option-desc">Offline, system voices</span>
+                </div>
+              </button>
+              <button
+                class="voice-option"
+                class:active={localTtsProvider === 'edge'}
+                onclick={() => { localTtsProvider = 'edge'; providerDropdownOpen = false; }}
+              >
+                <span class="voice-option-check">{localTtsProvider === 'edge' ? '✓' : ''}</span>
+                <div class="voice-option-content">
+                  <span class="voice-option-name">Edge TTS</span>
+                  <span class="voice-option-desc">Cloud, 40+ languages, free</span>
+                </div>
+              </button>
+              <button
+                class="voice-option"
+                class:active={localTtsProvider === 'google'}
+                onclick={() => { localTtsProvider = 'google'; providerDropdownOpen = false; }}
+              >
+                <span class="voice-option-check">{localTtsProvider === 'google' ? '✓' : ''}</span>
+                <div class="voice-option-content">
+                  <span class="voice-option-name">Google Cloud TTS</span>
+                  <span class="voice-option-desc">WaveNet voices, requires API key</span>
+                </div>
+              </button>
+              <button
+                class="voice-option"
+                class:active={localTtsProvider === 'elevenlabs'}
+                onclick={() => { localTtsProvider = 'elevenlabs'; providerDropdownOpen = false; }}
+              >
+                <span class="voice-option-check">{localTtsProvider === 'elevenlabs' ? '✓' : ''}</span>
+                <div class="voice-option-content">
+                  <span class="voice-option-name">ElevenLabs</span>
+                  <span class="voice-option-desc">Ultra-realistic AI voices, API key</span>
+                </div>
+              </button>
             </div>
-          </label>
+          {/if}
         </div>
 
         <!-- Google API Key (shown when Google is selected) -->
@@ -667,11 +788,37 @@
           </div>
         {/if}
 
+        <!-- ElevenLabs API Key (shown when ElevenLabs is selected) -->
+        {#if localTtsProvider === 'elevenlabs'}
+          <div class="field">
+            <div class="label-row">
+              <label for="elevenlabs-api-key">ElevenLabs API Key</label>
+              <span class="badge-required">Required</span>
+            </div>
+            <p class="field-desc">Required for ElevenLabs Text-to-Speech.</p>
+            <input
+              id="elevenlabs-api-key"
+              type="password"
+              class:input-error={elevenlabsApiKeyError}
+              placeholder="Enter your ElevenLabs API key"
+              bind:value={localElevenlabsApiKey}
+              oninput={() => elevenlabsApiKeyError = false}
+              disabled={isTranslating}
+            />
+            {#if elevenlabsApiKeyError}
+              <p class="field-error">API key is required to use ElevenLabs TTS.</p>
+            {/if}
+            <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener noreferrer" class="field-link">
+              Get API key
+            </a>
+          </div>
+        {/if}
+
         <!-- Voice selector -->
         <div class="section-label" style="margin-top: var(--space-lg);">Voice</div>
-        {#if localTtsProvider === 'edge' || localTtsProvider === 'google'}
-          <p class="section-desc">{localTtsProvider === 'edge' ? 'Microsoft Neural voices for high-quality speech.' : 'Google WaveNet/Neural2 voices for natural speech.'}</p>
-          <div class="voice-dropdown-container">
+        {#if localTtsProvider === 'edge' || localTtsProvider === 'google' || localTtsProvider === 'elevenlabs'}
+          <p class="section-desc">{localTtsProvider === 'edge' ? 'Microsoft Neural voices for high-quality speech.' : localTtsProvider === 'google' ? 'Google WaveNet/Neural2 voices for natural speech.' : 'ElevenLabs ultra-realistic AI voices.'}</p>
+          <div class="voice-dropdown-container" class:open={voiceDropdownOpen}>
             <!-- Trigger -->
             <button
               class="voice-trigger"
@@ -699,15 +846,17 @@
 
             <!-- Dropdown list -->
             {#if voiceDropdownOpen && !isTranslating && localTtsEnabled}
-              <div class="voice-dropdown">
+              <div class="voice-dropdown" style="top:{dropdownPos.top}px;left:{dropdownPos.left}px;width:{dropdownPos.width}px">
                 <button
                   class="voice-option"
                   class:active={localTtsVoice === ''}
                   onclick={() => selectVoice('')}
                 >
                   <span class="voice-option-check">{localTtsVoice === '' ? '✓' : ''}</span>
-                  <span class="voice-option-name">Auto</span>
-                  <span class="voice-option-detail">Best for language</span>
+                  <div class="voice-option-content">
+                    <span class="voice-option-name">Auto</span>
+                    <span class="voice-option-desc">Best for language</span>
+                  </div>
                 </button>
                 {#each availableVoices as voice (voice.name)}
                   <button
@@ -716,8 +865,10 @@
                     onclick={() => selectVoice(voice.name)}
                   >
                     <span class="voice-option-check">{localTtsVoice === voice.name ? '✓' : ''}</span>
-                    <span class="voice-option-name">{parseVoiceDisplay(voice).name}</span>
-                    <span class="voice-option-detail">— {voice.gender ?? '—'}</span>
+                    <div class="voice-option-content">
+                      <span class="voice-option-name">{parseVoiceDisplay(voice).name}</span>
+                      <span class="voice-option-desc">{voice.gender ?? '—'}</span>
+                    </div>
                     <span class="voice-option-flag">{getFlag(voice.lang ?? '', voice.name ?? '')}</span>
                   </button>
                 {/each}
@@ -725,7 +876,7 @@
             {/if}
           </div>
         {:else}
-          <p class="section-desc">Web Speech uses your system's default voice. Switch to Edge TTS or Google Cloud for voice selection.</p>
+          <p class="section-desc">Web Speech uses your system's default voice. Switch to another provider for voice selection.</p>
           <div class="voice-dropdown-container">
             <button class="voice-trigger" disabled>
               <span class="voice-trigger-text voice-trigger-placeholder">System default voice</span>
@@ -938,11 +1089,6 @@
   }
 
   /* Mode cards — rounder */
-  .mode-cards {
-    display: flex;
-    gap: var(--space-sm);
-  }
-
   .mode-card {
     flex: 1;
     cursor: pointer;
@@ -996,24 +1142,6 @@
   .source-card {
     flex: 1;
     min-width: 0;
-  }
-
-  /* Provider grid — 2-column layout for 3 TTS cards */
-  .provider-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-sm);
-  }
-
-  /* 3rd card spans full width on its own row */
-  .provider-card-full {
-    grid-column: 1 / -1;
-  }
-
-  .provider-card-full .mode-card-content {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-sm);
   }
 
   /* Fields — rounder inputs */
@@ -1341,6 +1469,10 @@
     z-index: 50;
   }
 
+  .voice-dropdown-container.open {
+    z-index: 100;
+  }
+
   .voice-trigger {
     width: 100%;
     display: flex;
@@ -1397,18 +1529,27 @@
   }
 
   .voice-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    max-height: 320px;
+    position: fixed;
+    max-height: 280px;
     overflow-y: auto;
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     border: 1px solid var(--border);
     background: var(--bg-solid);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-    z-index: 50;
     padding: 4px;
+    z-index: 100;
+    animation: dropdownSlideIn 0.12s ease;
+  }
+
+  @keyframes dropdownSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .voice-option {
@@ -1437,20 +1578,39 @@
   }
 
   .voice-option-check {
-    width: 14px;
+    width: 16px;
+    height: 16px;
     flex-shrink: 0;
-    text-align: center;
-    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
     color: var(--accent);
     font-weight: 600;
   }
 
-  .voice-option-name {
-    font-weight: 500;
+  .voice-option-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
   }
 
-  .voice-option-detail {
+  .voice-option-name {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .voice-option-desc {
+    font-size: var(--font-size-xs);
     color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
   }
 
   .voice-option-flag {

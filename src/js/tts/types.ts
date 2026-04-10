@@ -2,7 +2,7 @@
  * TTS provider types and shared interfaces.
  */
 
-export type TTSProviderName = 'webspeech' | 'edge' | 'google';
+export type TTSProviderName = 'webspeech' | 'edge' | 'google' | 'elevenlabs';
 
 export interface TTSVoice {
   name: string;
