@@ -41,6 +41,12 @@ pub struct Settings {
     /// Whether TTS is enabled (speak translated text aloud)
     #[serde(default = "default_tts_enabled")]
     pub tts_enabled: bool,
+    /// Selected TTS voice name (empty = auto-detect)
+    #[serde(default)]
+    pub tts_voice: String,
+    /// TTS speech rate (0.5–2.0, default 1.0)
+    #[serde(default = "default_tts_rate")]
+    pub tts_rate: f64,
 }
 
 fn default_translation_type() -> String {
@@ -71,6 +77,10 @@ fn default_tts_enabled() -> bool {
     false
 }
 
+fn default_tts_rate() -> f64 {
+    1.0
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -85,6 +95,8 @@ impl Default for Settings {
             max_lines: default_max_lines(),
             endpoint_delay: default_endpoint_delay(),
             tts_enabled: default_tts_enabled(),
+            tts_voice: String::new(),
+            tts_rate: default_tts_rate(),
         }
     }
 }
@@ -109,8 +121,6 @@ pub struct AuralisState {
     pub pipeline: Arc<std::sync::Mutex<Option<PipelineState>>>,
     /// Set to true when the Python pipeline emits {"type": "ready"}
     pub pipeline_ready: Arc<AtomicBool>,
-    /// Currently running TTS process (if any)
-    pub tts_process: Arc<std::sync::Mutex<Option<std::process::Child>>>,
 }
 
 impl AuralisState {
@@ -122,7 +132,6 @@ impl AuralisState {
             settings: Arc::new(Mutex::new(Settings::default())),
             pipeline: Arc::new(std::sync::Mutex::new(None)),
             pipeline_ready: Arc::new(AtomicBool::new(false)),
-            tts_process: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 

@@ -2,6 +2,7 @@
   import ModelDownloader from './ModelDownloader.svelte';
   import type { OperatingMode, TranslationType, AudioSource } from '../types';
   import { getLangLabel } from '../js/lang';
+  import { tts } from '../js/tts';
 
   let {
     mode = 'cloud',
@@ -16,6 +17,8 @@
     maxLines = 100,
     endpointDelay = 1.0,
     ttsEnabled = false,
+    ttsVoice = '',
+    ttsRate = 1.0,
     onSave,
     onBack,
   }: {
@@ -31,6 +34,8 @@
     maxLines?: number;
     endpointDelay?: number;
     ttsEnabled?: boolean;
+    ttsVoice?: string;
+    ttsRate?: number;
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -43,6 +48,8 @@
       max_lines: number;
       endpoint_delay: number;
       tts_enabled: boolean;
+      tts_voice: string;
+      tts_rate: number;
     }) => void;
     onBack: () => void;
   } = $props();
@@ -60,6 +67,10 @@
   let localEndpointDelay = $state(1.0);
   let localEndpointTenths = $state(10);
   let localTtsEnabled = $state(false);
+  let localTtsVoice = $state('');
+  let localTtsRate = $state(1.0);
+  let localTtsRateTenths = $state(10);
+  let availableVoices: Array<{ name: string; lang: string; local: boolean }> = $state([]);
   let activeTab = $state<'translation' | 'display' | 'tts' | 'about'>('translation');
 
   // Update checker state
@@ -86,12 +97,24 @@
     localEndpointDelay = endpointDelay;
     localEndpointTenths = Math.round(endpointDelay * 10);
     localTtsEnabled = ttsEnabled;
+    localTtsVoice = ttsVoice;
+    localTtsRate = ttsRate;
+    localTtsRateTenths = Math.round(ttsRate * 10);
   });
 
   // Load version when About tab is opened
   $effect(() => {
     if (activeTab === 'about') {
       loadVersion();
+    }
+  });
+
+  // Load voices when TTS tab is opened
+  $effect(() => {
+    if (activeTab === 'tts') {
+      tts.getVoices(localTarget).then((v) => {
+        availableVoices = v;
+      });
     }
   });
 
@@ -123,6 +146,8 @@
       max_lines: localMaxLines,
       endpoint_delay: localEndpointDelay,
       tts_enabled: localTtsEnabled,
+      tts_voice: localTtsVoice,
+      tts_rate: localTtsRate,
     });
   }
 
@@ -423,10 +448,12 @@
 
     {:else if activeTab === 'tts'}
       <div class="settings-section">
-        <div class="section-label">Text-to-Speech</div>
-        <p class="section-desc">When enabled, translated text is automatically spoken aloud using macOS built-in voices.</p>
-        <div class="toggle-row">
-          <span class="toggle-label">Speak translations aloud</span>
+        <!-- Toggle card -->
+        <div class="toggle-card">
+          <div class="toggle-card-info">
+            <span class="toggle-card-label">Speak translations aloud</span>
+            <span class="toggle-card-desc">Uses your system's built-in voices. Works offline.</span>
+          </div>
           <button
             class="toggle"
             class:active={localTtsEnabled}
@@ -438,23 +465,36 @@
           </button>
         </div>
 
-        <div class="section-label" style="margin-top: var(--space-lg);">Supported Languages</div>
-        <p class="section-desc">macOS TTS voices are available for the following target languages:</p>
-        <div class="tts-lang-grid">
-          <span class="tts-lang supported">English</span>
-          <span class="tts-lang supported">Spanish</span>
-          <span class="tts-lang supported">French</span>
-          <span class="tts-lang supported">German</span>
-          <span class="tts-lang supported">Chinese</span>
-          <span class="tts-lang supported">Japanese</span>
-          <span class="tts-lang supported">Korean</span>
-          <span class="tts-lang supported">Portuguese</span>
-          <span class="tts-lang supported">Russian</span>
-          <span class="tts-lang supported">Arabic</span>
-          <span class="tts-lang unsupported">Vietnamese</span>
-          <span class="tts-lang unsupported">Hindi</span>
+        <!-- Voice selector -->
+        <div class="slider-card">
+          <div class="slider-card-header">
+            <span class="slider-card-label">Voice</span>
+          </div>
+          <select bind:value={localTtsVoice} disabled={isTranslating || !localTtsEnabled}>
+            <option value="">Auto (best for language)</option>
+            {#each availableVoices as voice}
+              <option value={voice.name}>{voice.name} ({voice.lang}){voice.local ? '' : ' ☁'}</option>
+            {/each}
+          </select>
         </div>
-        <p class="section-desc tts-note">Unsupported languages will be available once Piper TTS is integrated.</p>
+
+        <!-- Speed slider -->
+        <div class="slider-card">
+          <div class="slider-card-header">
+            <span class="slider-card-label">Speed</span>
+            <span class="slider-card-value">{localTtsRate.toFixed(1)}x</span>
+          </div>
+          <input
+            type="range"
+            min="5"
+            max="20"
+            step="1"
+            bind:value={localTtsRateTenths}
+            oninput={() => localTtsRate = localTtsRateTenths / 10}
+            class="slider"
+            style="--fill: {((localTtsRateTenths - 5) / 15) * 100}%"
+          />
+        </div>
       </div>
 
     {:else}
@@ -935,6 +975,39 @@
     color: var(--text-primary);
   }
 
+  /* Toggle card */
+  .toggle-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    transition: border-color 0.2s ease;
+  }
+
+  .toggle-card:hover {
+    border-color: var(--border-hover);
+  }
+
+  .toggle-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .toggle-card-label {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .toggle-card-desc {
+    font-size: var(--font-size-xs);
+    color: var(--text-dim);
+  }
+
   .toggle {
     width: 40px;
     height: 22px;
@@ -972,37 +1045,31 @@
     cursor: default;
   }
 
-  /* TTS language grid */
-  .tts-lang-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: var(--space-xs);
-  }
-
-  .tts-lang {
-    font-size: var(--font-size-xs);
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-weight: 500;
-  }
-
-  .tts-lang.supported {
-    background: var(--accent-dim);
-    color: var(--accent);
-    border: 1px solid rgba(99, 140, 255, 0.2);
-  }
-
-  .tts-lang.unsupported {
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--text-dim);
+  /* Voice selector */
+  .slider-card select {
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border);
-    text-decoration: line-through;
-    opacity: 0.6;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family);
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s ease;
   }
 
-  .tts-note {
-    margin-top: var(--space-xs);
-    font-style: italic;
+  .slider-card select:hover {
+    border-color: var(--border-hover);
+  }
+
+  .slider-card select:focus {
+    border-color: var(--accent);
+  }
+
+  .slider-card select:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 </style>

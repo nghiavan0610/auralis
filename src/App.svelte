@@ -9,6 +9,7 @@
   import ControlBar from './components/ControlBar.svelte';
   import Transcript from './components/Transcript.svelte';
   import SettingsView from './components/SettingsView.svelte';
+  import { tts } from './js/tts';
 
   // ---------------------------------------------------------------------------
   // State
@@ -24,6 +25,8 @@
   let displayMaxLines = $state(100);
   let endpointDelay = $state(1.0);
   let ttsEnabled = $state(false);
+  let ttsVoice = $state('');
+  let ttsRate = $state(1.0);
   let sonioxApiKey = $state('');
   let isTranslating = $state(false);
   let statusMessage = $state('Ready');
@@ -44,6 +47,12 @@
   $effect(() => {
     document.documentElement.style.setProperty('--app-opacity', String(displayOpacity));
     document.documentElement.style.setProperty('--font-size-base', `${displayFontSize}px`);
+  });
+
+  // Sync TTS engine settings with state
+  $effect(() => {
+    tts.setVoice(ttsVoice);
+    tts.setRate(ttsRate);
   });
 
   // Soniox client instance
@@ -145,6 +154,8 @@
         max_lines: number;
         endpoint_delay?: number;
         tts_enabled?: boolean;
+        tts_voice?: string;
+        tts_rate?: number;
       }>('get_settings');
 
       if (settings.mode === 'cloud' || settings.mode === 'offline') {
@@ -167,6 +178,8 @@
       }
       endpointDelay = (settings.endpoint_delay as number) || 1.0;
       ttsEnabled = settings.tts_enabled as boolean;
+      ttsVoice = settings.tts_voice ?? '';
+      ttsRate = settings.tts_rate ?? 1.0;
       sonioxApiKey = settings.soniox_api_key;
       sourceLanguage = settings.source_language;
       targetLanguage = settings.target_language;
@@ -189,6 +202,8 @@
         max_lines: displayMaxLines,
         endpoint_delay: endpointDelay,
         tts_enabled: ttsEnabled,
+        tts_voice: ttsVoice,
+        tts_rate: ttsRate,
       },
     });
   }
@@ -307,7 +322,7 @@
   async function handleStop(): Promise<void> {
     try {
       // Stop any playing TTS
-      try { await invoke('stop_tts'); } catch {}
+      tts.stop();
 
       if (mode === 'cloud') {
         stopCloudMode();
@@ -345,6 +360,8 @@
     max_lines: number;
     endpoint_delay: number;
     tts_enabled: boolean;
+    tts_voice: string;
+    tts_rate: number;
   }) {
     mode = settings.mode;
     sonioxApiKey = settings.soniox_api_key;
@@ -357,6 +374,8 @@
     displayMaxLines = settings.max_lines;
     endpointDelay = settings.endpoint_delay;
     ttsEnabled = settings.tts_enabled;
+    ttsVoice = settings.tts_voice;
+    ttsRate = settings.tts_rate;
     persistSettings();
     currentView = 'main';
   }
@@ -384,13 +403,9 @@
     persistSettings();
   }
 
-  async function speakTranslation(text: string, targetLang: string): Promise<void> {
+  function speakTranslation(text: string, targetLang: string): void {
     if (!ttsEnabled || !text.trim()) return;
-    try {
-      await invoke('speak_text', { text, language: targetLang });
-    } catch (err) {
-      console.warn('[Auralis] TTS failed:', err);
-    }
+    tts.speak(text, targetLang);
   }
 
   function showError(msg: string) {
@@ -547,6 +562,8 @@
     maxLines={displayMaxLines}
     endpointDelay={endpointDelay}
     ttsEnabled={ttsEnabled}
+    ttsVoice={ttsVoice}
+    ttsRate={ttsRate}
     onSave={handleSettingsSave}
     onBack={handleSettingsBack}
   />
