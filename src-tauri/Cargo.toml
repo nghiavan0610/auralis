@@ -24,6 +24,12 @@ dirs = "5.0"
 once_cell = "1"
 auralis = { path = ".." }
 
+# Edge TTS
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+
 # macOS: ScreenCaptureKit for system audio capture
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = "1.5"

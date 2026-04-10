@@ -47,6 +47,9 @@ pub struct Settings {
     /// TTS speech rate (0.5–2.0, default 1.0)
     #[serde(default = "default_tts_rate")]
     pub tts_rate: f64,
+    /// TTS provider: "webspeech" or "edge"
+    #[serde(default = "default_tts_provider")]
+    pub tts_provider: String,
 }
 
 fn default_translation_type() -> String {
@@ -81,6 +84,10 @@ fn default_tts_rate() -> f64 {
     1.0
 }
 
+fn default_tts_provider() -> String {
+    "webspeech".to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -97,6 +104,7 @@ impl Default for Settings {
             tts_enabled: default_tts_enabled(),
             tts_voice: String::new(),
             tts_rate: default_tts_rate(),
+            tts_provider: default_tts_provider(),
         }
     }
 }

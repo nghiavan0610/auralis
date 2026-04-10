@@ -27,6 +27,7 @@
   let ttsEnabled = $state(false);
   let ttsVoice = $state('');
   let ttsRate = $state(1.0);
+  let ttsProvider: 'webspeech' | 'edge' = $state('webspeech');
   let sonioxApiKey = $state('');
   let isTranslating = $state(false);
   let statusMessage = $state('Ready');
@@ -51,6 +52,7 @@
 
   // Sync TTS engine settings with state
   $effect(() => {
+    tts.setProvider(ttsProvider);
     tts.setVoice(ttsVoice);
     tts.setRate(ttsRate);
   });
@@ -156,6 +158,7 @@
         tts_enabled?: boolean;
         tts_voice?: string;
         tts_rate?: number;
+        tts_provider?: string;
       }>('get_settings');
 
       if (settings.mode === 'cloud' || settings.mode === 'offline') {
@@ -180,6 +183,7 @@
       ttsEnabled = settings.tts_enabled as boolean;
       ttsVoice = settings.tts_voice ?? '';
       ttsRate = settings.tts_rate ?? 1.0;
+      ttsProvider = (settings.tts_provider as 'webspeech' | 'edge') ?? 'webspeech';
       sonioxApiKey = settings.soniox_api_key;
       sourceLanguage = settings.source_language;
       targetLanguage = settings.target_language;
@@ -204,6 +208,7 @@
         tts_enabled: ttsEnabled,
         tts_voice: ttsVoice,
         tts_rate: ttsRate,
+        tts_provider: ttsProvider,
       },
     });
   }
@@ -362,6 +367,7 @@
     tts_enabled: boolean;
     tts_voice: string;
     tts_rate: number;
+    tts_provider: 'webspeech' | 'edge';
   }) {
     mode = settings.mode;
     sonioxApiKey = settings.soniox_api_key;
@@ -376,6 +382,7 @@
     ttsEnabled = settings.tts_enabled;
     ttsVoice = settings.tts_voice;
     ttsRate = settings.tts_rate;
+    ttsProvider = settings.tts_provider;
     persistSettings();
     currentView = 'main';
   }
@@ -564,6 +571,7 @@
     ttsEnabled={ttsEnabled}
     ttsVoice={ttsVoice}
     ttsRate={ttsRate}
+    ttsProvider={ttsProvider}
     onSave={handleSettingsSave}
     onBack={handleSettingsBack}
   />

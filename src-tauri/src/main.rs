@@ -8,6 +8,8 @@ mod commands;
 mod commands_audio;
 mod commands_settings;
 mod commands_pipeline;
+mod commands_edge_tts;
+mod edge_tts;
 
 use state::AuralisState;
 
@@ -16,6 +18,7 @@ use commands::*;
 use commands_audio::*;
 use commands_settings::*;
 use commands_pipeline::*;
+use commands_edge_tts::*;
 
 // Import Manager trait for window access
 use tauri::Manager;
@@ -59,6 +62,9 @@ fn main() {
             // Offline setup
             check_offline_ready,
             setup_offline_environment,
+            // Edge TTS
+            edge_tts_synthesize,
+            edge_tts_list_voices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

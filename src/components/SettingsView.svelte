@@ -19,6 +19,7 @@
     ttsEnabled = false,
     ttsVoice = '',
     ttsRate = 1.0,
+    ttsProvider = 'webspeech' as 'webspeech' | 'edge',
     onSave,
     onBack,
   }: {
@@ -36,6 +37,7 @@
     ttsEnabled?: boolean;
     ttsVoice?: string;
     ttsRate?: number;
+    ttsProvider?: 'webspeech' | 'edge';
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -50,6 +52,7 @@
       tts_enabled: boolean;
       tts_voice: string;
       tts_rate: number;
+      tts_provider: 'webspeech' | 'edge';
     }) => void;
     onBack: () => void;
   } = $props();
@@ -70,6 +73,7 @@
   let localTtsVoice = $state('');
   let localTtsRate = $state(1.0);
   let localTtsRateTenths = $state(10);
+  let localTtsProvider: 'webspeech' | 'edge' = $state('webspeech');
   let availableVoices: Array<{ name: string; lang: string; local: boolean }> = $state([]);
   let activeTab = $state<'translation' | 'display' | 'tts' | 'about'>('translation');
 
@@ -100,6 +104,7 @@
     localTtsVoice = ttsVoice;
     localTtsRate = ttsRate;
     localTtsRateTenths = Math.round(ttsRate * 10);
+    localTtsProvider = ttsProvider;
   });
 
   // Load version when About tab is opened
@@ -109,9 +114,10 @@
     }
   });
 
-  // Load voices when TTS tab is opened
+  // Load voices when TTS tab is opened or provider changes
   $effect(() => {
     if (activeTab === 'tts') {
+      tts.setProvider(localTtsProvider);
       tts.getVoices(localTarget).then((v) => {
         availableVoices = v;
       });
@@ -148,6 +154,7 @@
       tts_enabled: localTtsEnabled,
       tts_voice: localTtsVoice,
       tts_rate: localTtsRate,
+      tts_provider: localTtsProvider,
     });
   }
 
@@ -452,7 +459,7 @@
         <div class="toggle-card">
           <div class="toggle-card-info">
             <span class="toggle-card-label">Speak translations aloud</span>
-            <span class="toggle-card-desc">Uses your system's built-in voices. Works offline.</span>
+            <span class="toggle-card-desc">{localTtsProvider === 'edge' ? 'Cloud voices via Edge TTS. Requires internet.' : "Uses your system's built-in voices. Works offline."}</span>
           </div>
           <button
             class="toggle"
@@ -463,6 +470,17 @@
           >
             <span class="toggle-thumb"></span>
           </button>
+        </div>
+
+        <!-- Provider selector -->
+        <div class="slider-card">
+          <div class="slider-card-header">
+            <span class="slider-card-label">Provider</span>
+          </div>
+          <select bind:value={localTtsProvider} disabled={isTranslating || !localTtsEnabled}>
+            <option value="webspeech">Web Speech (offline)</option>
+            <option value="edge">Edge TTS (cloud, 40+ languages)</option>
+          </select>
         </div>
 
         <!-- Voice selector -->
