@@ -73,7 +73,13 @@ pub async fn save_settings(
         .map_err(|e| format!("Failed to write settings file: {}", e))?;
 
     // Update in-memory state
+    let old_settings = state.settings.lock().await.clone();
     *state.settings.lock().await = settings.clone();
+
+    // Invalidate Google TTS voice cache if API key changed
+    if old_settings.google_api_key != settings.google_api_key {
+        crate::google_tts::voices::invalidate_cache();
+    }
 
     tracing::info!(
         mode = %settings.mode,

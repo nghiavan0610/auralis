@@ -7,6 +7,7 @@
   let {
     mode = 'cloud',
     sonioxApiKey = '',
+    googleApiKey = '',
     sourceLanguage = 'en',
     targetLanguage = 'vi',
     translationType = 'one_way',
@@ -19,12 +20,13 @@
     ttsEnabled = false,
     ttsVoice = '',
     ttsRate = 1.0,
-    ttsProvider = 'webspeech' as 'webspeech' | 'edge',
+    ttsProvider = 'webspeech' as 'webspeech' | 'edge' | 'google',
     onSave,
     onBack,
   }: {
     mode?: OperatingMode;
     sonioxApiKey?: string;
+    googleApiKey?: string;
     sourceLanguage?: string;
     targetLanguage?: string;
     translationType?: TranslationType;
@@ -37,7 +39,7 @@
     ttsEnabled?: boolean;
     ttsVoice?: string;
     ttsRate?: number;
-    ttsProvider?: 'webspeech' | 'edge';
+    ttsProvider?: 'webspeech' | 'edge' | 'google';
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -52,7 +54,8 @@
       tts_enabled: boolean;
       tts_voice: string;
       tts_rate: number;
-      tts_provider: 'webspeech' | 'edge';
+      tts_provider: 'webspeech' | 'edge' | 'google';
+      google_api_key: string;
     }) => void;
     onBack: () => void;
   } = $props();
@@ -73,7 +76,8 @@
   let localTtsVoice = $state('');
   let localTtsRate = $state(1.0);
   let localTtsRateTenths = $state(10);
-  let localTtsProvider: 'webspeech' | 'edge' = $state('webspeech');
+  let localTtsProvider: 'webspeech' | 'edge' | 'google' = $state('webspeech');
+  let localGoogleApiKey = $state('');
   let voiceDropdownOpen = $state(false);
   let availableVoices: Array<{ name: string; lang: string; local: boolean; gender?: string }> = $state([]);
   let activeTab = $state<'translation' | 'display' | 'tts' | 'about'>('translation');
@@ -106,6 +110,7 @@
     localTtsRate = ttsRate;
     localTtsRateTenths = Math.round(ttsRate * 10);
     localTtsProvider = ttsProvider;
+    localGoogleApiKey = googleApiKey;
   });
 
   // Load version when About tab is opened
@@ -117,8 +122,11 @@
 
   // Load voices when TTS tab is opened or provider changes
   $effect(() => {
+    const provider = localTtsProvider; // Read to create reactive dependency
     if (activeTab === 'tts') {
-      tts.setProvider(localTtsProvider);
+      tts.setProvider(provider);
+      // Reset voice selection when provider changes
+      localTtsVoice = '';
       tts.getVoices().then((v) => {
         // Sort: target language voices first, then others by lang
         const target = localTarget.toLowerCase();
@@ -148,7 +156,33 @@
     { code: 'hi', label: 'Hindi' },
   ];
 
+  // Validation state
+  let googleApiKeyError = $state(false);
+  let sonioxApiKeyError = $state(false);
+
   function handleSave() {
+    // Validate: Cloud mode requires a Soniox API key
+    if (localMode === 'cloud' && !localApiKey.trim()) {
+      sonioxApiKeyError = true;
+      activeTab = 'translation';
+      setTimeout(() => {
+        document.getElementById('api-key')?.focus();
+      }, 50);
+      return;
+    }
+    sonioxApiKeyError = false;
+
+    // Validate: Google TTS requires an API key
+    if (localTtsProvider === 'google' && !localGoogleApiKey.trim()) {
+      googleApiKeyError = true;
+      activeTab = 'tts';
+      setTimeout(() => {
+        document.getElementById('google-api-key')?.focus();
+      }, 50);
+      return;
+    }
+    googleApiKeyError = false;
+
     onSave({
       mode: localMode,
       soniox_api_key: localApiKey,
@@ -164,6 +198,7 @@
       tts_voice: localTtsVoice,
       tts_rate: localTtsRate,
       tts_provider: localTtsProvider,
+      google_api_key: localGoogleApiKey,
     });
   }
 
@@ -328,15 +363,23 @@
         <!-- 2. Mode-specific setup (right after mode choice) -->
         {#if localMode === 'cloud'}
           <div class="field">
-            <label for="api-key">Soniox API Key</label>
+            <div class="label-row">
+              <label for="api-key">Soniox API Key</label>
+              <span class="badge-required">Required</span>
+            </div>
             <p class="field-desc">Required for cloud mode. Get a free key from soniox.com.</p>
             <input
               id="api-key"
               type="password"
+              class:input-error={sonioxApiKeyError}
               placeholder="Enter your Soniox API key"
               bind:value={localApiKey}
+              oninput={() => sonioxApiKeyError = false}
               disabled={isTranslating}
             />
+            {#if sonioxApiKeyError}
+              <p class="field-error">API key is required for cloud mode.</p>
+            {/if}
             <a href="https://soniox.com/api-keys" target="_blank" rel="noopener noreferrer" class="field-link">
               Get API key
             </a>
@@ -555,8 +598,8 @@
 
         <!-- Provider cards -->
         <div class="section-label" style="margin-top: var(--space-lg);">Provider</div>
-        <p class="section-desc">Choose between offline system voices or cloud-based Edge TTS.</p>
-        <div class="mode-cards">
+        <p class="section-desc">Choose between offline system voices or cloud-based TTS providers.</p>
+        <div class="provider-grid">
           <label class="mode-card" class:active={localTtsProvider === 'webspeech'}>
             <input type="radio" name="tts-provider" value="webspeech" bind:group={localTtsProvider} disabled={isTranslating || !localTtsEnabled} />
             <div class="mode-card-content">
@@ -582,12 +625,52 @@
               <span class="mode-desc">Cloud, 40+ languages, free</span>
             </div>
           </label>
+          <label class="mode-card provider-card-full" class:active={localTtsProvider === 'google'}>
+            <input type="radio" name="tts-provider" value="google" bind:group={localTtsProvider} disabled={isTranslating || !localTtsEnabled} />
+            <div class="mode-card-content">
+              <span class="mode-name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+                  <path d="M2 12h20"/>
+                  <path d="M12 2c2.5 2.8 4 6.2 4 10s-1.5 7.2-4 10c-2.5-2.8-4-6.2-4-10s1.5-7.2 4-10z"/>
+                </svg>
+                Google Cloud TTS
+              </span>
+              <span class="mode-desc">WaveNet voices, requires API key</span>
+            </div>
+          </label>
         </div>
+
+        <!-- Google API Key (shown when Google is selected) -->
+        {#if localTtsProvider === 'google'}
+          <div class="field">
+            <div class="label-row">
+              <label for="google-api-key">Google Cloud API Key</label>
+              <span class="badge-required">Required</span>
+            </div>
+            <p class="field-desc">Required for Google Cloud Text-to-Speech.</p>
+            <input
+              id="google-api-key"
+              type="password"
+              class:input-error={googleApiKeyError}
+              placeholder="Enter your Google Cloud TTS API key"
+              bind:value={localGoogleApiKey}
+              oninput={() => googleApiKeyError = false}
+              disabled={isTranslating}
+            />
+            {#if googleApiKeyError}
+              <p class="field-error">API key is required to use Google Cloud TTS.</p>
+            {/if}
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" class="field-link">
+              Get API key
+            </a>
+          </div>
+        {/if}
 
         <!-- Voice selector -->
         <div class="section-label" style="margin-top: var(--space-lg);">Voice</div>
-        {#if localTtsProvider === 'edge'}
-          <p class="section-desc">Microsoft Neural voices for high-quality speech.</p>
+        {#if localTtsProvider === 'edge' || localTtsProvider === 'google'}
+          <p class="section-desc">{localTtsProvider === 'edge' ? 'Microsoft Neural voices for high-quality speech.' : 'Google WaveNet/Neural2 voices for natural speech.'}</p>
           <div class="voice-dropdown-container">
             <!-- Trigger -->
             <button
@@ -642,7 +725,7 @@
             {/if}
           </div>
         {:else}
-          <p class="section-desc">Web Speech uses your system's default voice. Switch to Edge TTS for voice selection.</p>
+          <p class="section-desc">Web Speech uses your system's default voice. Switch to Edge TTS or Google Cloud for voice selection.</p>
           <div class="voice-dropdown-container">
             <button class="voice-trigger" disabled>
               <span class="voice-trigger-text voice-trigger-placeholder">System default voice</span>
@@ -915,6 +998,24 @@
     min-width: 0;
   }
 
+  /* Provider grid — 2-column layout for 3 TTS cards */
+  .provider-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-sm);
+  }
+
+  /* 3rd card spans full width on its own row */
+  .provider-card-full {
+    grid-column: 1 / -1;
+  }
+
+  .provider-card-full .mode-card-content {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
   /* Fields — rounder inputs */
   .field {
     display: flex;
@@ -927,6 +1028,44 @@
     color: var(--text-dim);
     margin: 0;
     line-height: 1.4;
+  }
+
+  .field-error {
+    font-size: var(--font-size-xs);
+    color: var(--danger);
+    margin: 0;
+    line-height: 1.4;
+    font-weight: 500;
+  }
+
+  .label-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .badge-required {
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #1a1b2e;
+    background: var(--warning);
+    padding: 1px 6px;
+    border-radius: 4px;
+    line-height: 1.5;
+  }
+
+  .input-error {
+    border-color: var(--danger) !important;
+    box-shadow: 0 0 0 3px rgba(255, 77, 77, 0.12) !important;
+    animation: shake 0.3s ease;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-4px); }
+    40%, 80% { transform: translateX(4px); }
   }
 
   .field-link {

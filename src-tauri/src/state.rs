@@ -47,9 +47,12 @@ pub struct Settings {
     /// TTS speech rate (0.5–2.0, default 1.0)
     #[serde(default = "default_tts_rate")]
     pub tts_rate: f64,
-    /// TTS provider: "webspeech" or "edge"
+    /// TTS provider: "webspeech" or "edge" or "google"
     #[serde(default = "default_tts_provider")]
     pub tts_provider: String,
+    /// Google Cloud TTS API key
+    #[serde(default)]
+    pub google_api_key: String,
 }
 
 fn default_translation_type() -> String {
@@ -105,6 +108,7 @@ impl Default for Settings {
             tts_voice: String::new(),
             tts_rate: default_tts_rate(),
             tts_provider: default_tts_provider(),
+            google_api_key: String::new(),
         }
     }
 }

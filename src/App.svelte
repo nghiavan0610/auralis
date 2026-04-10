@@ -27,7 +27,8 @@
   let ttsEnabled = $state(false);
   let ttsVoice = $state('');
   let ttsRate = $state(1.0);
-  let ttsProvider: 'webspeech' | 'edge' = $state('webspeech');
+  let ttsProvider: 'webspeech' | 'edge' | 'google' = $state('webspeech');
+  let googleApiKey = $state('');
   let sonioxApiKey = $state('');
   let isTranslating = $state(false);
   let statusMessage = $state('Ready');
@@ -159,6 +160,7 @@
         tts_voice?: string;
         tts_rate?: number;
         tts_provider?: string;
+        google_api_key?: string;
       }>('get_settings');
 
       if (settings.mode === 'cloud' || settings.mode === 'offline') {
@@ -180,10 +182,11 @@
         displayMaxLines = settings.max_lines;
       }
       endpointDelay = (settings.endpoint_delay as number) || 1.0;
-      ttsEnabled = settings.tts_enabled as boolean;
+      ttsEnabled = settings.tts_enabled ?? false;
       ttsVoice = settings.tts_voice ?? '';
       ttsRate = settings.tts_rate ?? 1.0;
-      ttsProvider = (settings.tts_provider as 'webspeech' | 'edge') ?? 'webspeech';
+      ttsProvider = (settings.tts_provider as 'webspeech' | 'edge' | 'google') ?? 'webspeech';
+      googleApiKey = settings.google_api_key ?? '';
       sonioxApiKey = settings.soniox_api_key;
       sourceLanguage = settings.source_language;
       targetLanguage = settings.target_language;
@@ -209,6 +212,7 @@
         tts_voice: ttsVoice,
         tts_rate: ttsRate,
         tts_provider: ttsProvider,
+        google_api_key: googleApiKey,
       },
     });
   }
@@ -367,10 +371,12 @@
     tts_enabled: boolean;
     tts_voice: string;
     tts_rate: number;
-    tts_provider: 'webspeech' | 'edge';
+    tts_provider: 'webspeech' | 'edge' | 'google';
+    google_api_key: string;
   }) {
     mode = settings.mode;
     sonioxApiKey = settings.soniox_api_key;
+    googleApiKey = settings.google_api_key;
     sourceLanguage = settings.source_language;
     targetLanguage = settings.target_language;
     translationType = settings.translation_type;
@@ -559,6 +565,7 @@
   <SettingsView
     {mode}
     {sonioxApiKey}
+    {googleApiKey}
     {sourceLanguage}
     {targetLanguage}
     {translationType}
