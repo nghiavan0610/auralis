@@ -90,6 +90,57 @@ jobs:
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag (if any)
+          PREV_TAG=$(git tag --sort=-creatordate | head -2 | tail -1)
+          if [ "$PREV_TAG" = "${{ github.ref_name }}" ]; then
+            PREV_TAG=$(git tag --sort=-creatordate | head -3 | tail -1)
+          fi
+
+          if [ -z "$PREV_TAG" ]; then
+            # First release — all commits
+            COMMITS=$(git log --pretty=format:"- %s" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD")
+          fi
+
+          # Categorize commits
+          FEATS=$(echo "$COMMITS" | grep -i "^- feat" || true)
+          FIXES=$(echo "$COMMITS" | grep -i "^- fix" || true)
+          OTHER=$(echo "$COMMITS" | grep -vi "^- feat" | grep -vi "^- fix" || true)
+
+          BODY=""
+          if [ -n "$FEATS" ]; then
+            BODY="${BODY}### Features\n\n${FEATS}\n\n"
+          fi
+          if [ -n "$FIXES" ]; then
+            BODY="${BODY}### Bug Fixes\n\n${FIXES}\n\n"
+          fi
+          if [ -n "$OTHER" ]; then
+            BODY="${BODY}### Other Changes\n\n${OTHER}\n\n"
+          fi
+
+          # Add install links
+          BODY="${BODY}---\n\n"
+          BODY="${BODY}📥 **Download**: [macOS (Apple Silicon)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${{ github.ref_name }}_aarch64.dmg) · [macOS (Intel)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${{ github.ref_name }}_x64.dmg) · [Windows](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${{ github.ref_name }}_x64-setup.exe)\n\n"
+          BODY="${BODY}📖 **Installation guides**: [macOS (EN)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide.md) · [macOS (VI)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide_vi.md) · [Windows (EN)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide_win.md) · [Windows (VI)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide_win_vi.md)"
+
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --notes "${{ steps.changelog.outputs.body }}"
+
       - name: Download all release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
