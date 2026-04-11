@@ -134,10 +134,18 @@
     localElevenlabsApiKey = elevenlabsApiKey;
   });
 
-  // Load version when About tab is opened
+  // Load version and check for updates when About tab is opened
+  // Use a flag to track if we've already checked, avoiding reactive dependency on updateStatus
+  let aboutAutoChecked = $state(false);
   $effect(() => {
     if (activeTab === 'about') {
       loadVersion();
+      if (!aboutAutoChecked) {
+        aboutAutoChecked = true;
+        checkForUpdates();
+      }
+    } else {
+      aboutAutoChecked = false;
     }
   });
 

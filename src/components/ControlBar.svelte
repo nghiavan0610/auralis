@@ -15,6 +15,7 @@
     isPinned = false,
     audioSource = 'microphone',
     ttsEnabled = false,
+    updateAvailable = false,
     platformInfo = null as PlatformInfo | null,
     onToggleRecord,
     onOpenSettings,
@@ -29,6 +30,7 @@
     isPinned?: boolean;
     audioSource?: AudioSource;
     ttsEnabled?: boolean;
+    updateAvailable?: boolean;
     platformInfo?: PlatformInfo | null;
     onToggleRecord: () => void;
     onOpenSettings: () => void;
@@ -61,11 +63,14 @@
 <div class="control-bar">
   <!-- Left: Gear + Status -->
   <div class="bar-section">
-    <button class="bar-btn" onclick={onOpenSettings} title="Open settings">
+    <button class="bar-btn gear-btn" onclick={onOpenSettings} title="Open settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
+      {#if updateAvailable}
+        <span class="update-badge"></span>
+      {/if}
     </button>
     <span class="status-dot" style="background: {statusColor()}"></span>
     <span class="status-text" data-tauri-drag-region>{statusText}</span>
@@ -229,6 +234,19 @@
   .bar-btn:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
   .bar-btn.active { color: var(--accent); }
   .bar-btn-close:hover { color: var(--danger); background: rgba(255, 77, 77, 0.1); }
+
+  /* Update badge on gear icon */
+  .gear-btn { position: relative; }
+  .update-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 4px rgba(99, 140, 255, 0.5);
+  }
 
   /* Audio source group */
   .src-group {

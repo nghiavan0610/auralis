@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { check as checkForUpdate } from '@tauri-apps/plugin-updater';
   import { SonioxClient } from './js/soniox';
   import type { ConnectionStatus } from './js/soniox';
   import type { Segment, OperatingMode, TranslationType, AudioSource } from './types';
@@ -26,6 +27,7 @@
   let mode: OperatingMode = $state('cloud');
   let sourceLanguage = $state('en');
   let targetLanguage = $state('vi');
+  let updateAvailable = $state(false);
   let translationType: TranslationType = $state('one_way');
   let audioSource: AudioSource = $state('microphone');
   let displayOpacity = $state(0.88);
@@ -457,6 +459,16 @@
       platformInfo = { os: 'unknown', system_audio_available: true, offline_mode_available: true };
     }
 
+    // Background update check — silently check for updates on startup
+    try {
+      const update = await checkForUpdate();
+      if (update?.available) {
+        updateAvailable = true;
+      }
+    } catch {
+      // Silently ignore — user can check manually in About
+    }
+
     const audioDataUnlisten = await listen<ArrayBuffer>('audio-data', (event) => {
       if (sonioxClient && mode === 'cloud') {
         sonioxClient.sendAudio(event.payload);
@@ -560,6 +572,7 @@
     audioSource={audioSource}
     ttsEnabled={ttsEnabled}
     {platformInfo}
+    {updateAvailable}
     onToggleRecord={handleToggleRecord}
     onOpenSettings={handleOpenSettings}
     onClear={handleClear}

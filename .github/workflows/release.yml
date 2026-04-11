@@ -34,7 +34,7 @@ jobs:
           key: ${{ matrix.rust-target }}
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Rust target
         run: rustup target add ${{ matrix.rust-target }}
@@ -69,7 +69,7 @@ jobs:
         uses: swatinem/rust-cache@v2
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Auralis (Windows)
         uses: tauri-apps/tauri-action@v0
@@ -89,7 +89,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Download all release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          cd release-assets
+          gh release download ${{ github.ref_name }} --repo ${{ github.repository }}
 
       - name: Generate latest.json
         env:
@@ -99,20 +105,20 @@ jobs:
           import glob, json, os
           tag = os.environ['GITHUB_REF_NAME']
           notes = 'Auralis ' + tag
-          # Find signature files to determine platforms
+          # Find signature files downloaded from the draft release
           platforms = {}
-          for sig in glob.glob('**/*.tar.gz.sig', recursive=True) + glob.glob('**/*.app.tar.gz.sig', recursive=True):
-              base = sig.replace('.sig', '')
-              url = f'https://github.com/nghiavan0610/auralis/releases/download/{tag}/{os.path.basename(base)}'
+          for sig in glob.glob('release-assets/**/*.tar.gz.sig', recursive=True) + glob.glob('release-assets/**/*.app.tar.gz.sig', recursive=True):
+              base = os.path.basename(sig).replace('.sig', '')
+              url = f'https://github.com/${{ github.repository }}/releases/download/{tag}/{base}'
               with open(sig) as f:
                   sig_content = f.read().strip()
-              platforms[os.path.basename(base)] = {'url': url, 'signature': sig_content}
-          for sig in glob.glob('**/*.exe.sig', recursive=True) + glob.glob('**/*.msi.sig', recursive=True):
-              base = sig.replace('.sig', '')
-              url = f'https://github.com/nghiavan0610/auralis/releases/download/{tag}/{os.path.basename(base)}'
+              platforms[base] = {'url': url, 'signature': sig_content}
+          for sig in glob.glob('release-assets/**/*.exe.sig', recursive=True) + glob.glob('release-assets/**/*.msi.sig', recursive=True):
+              base = os.path.basename(sig).replace('.sig', '')
+              url = f'https://github.com/${{ github.repository }}/releases/download/{tag}/{base}'
               with open(sig) as f:
                   sig_content = f.read().strip()
-              platforms[os.path.basename(base)] = {'url': url, 'signature': sig_content}
+              platforms[base] = {'url': url, 'signature': sig_content}
           latest = {
               'version': tag,
               'notes': notes,
