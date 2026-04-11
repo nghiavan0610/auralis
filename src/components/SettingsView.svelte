@@ -4,6 +4,12 @@
   import { getLangLabel } from '../js/lang';
   import { tts } from '../js/tts';
 
+  interface PlatformInfo {
+    os: string;
+    system_audio_available: boolean;
+    offline_mode_available: boolean;
+  }
+
   let {
     mode = 'cloud',
     sonioxApiKey = '',
@@ -22,6 +28,7 @@
     ttsRate = 1.0,
     ttsProvider = 'webspeech' as 'webspeech' | 'edge' | 'google' | 'elevenlabs',
     elevenlabsApiKey = '',
+    platformInfo = null as PlatformInfo | null,
     onSave,
     onBack,
   }: {
@@ -42,6 +49,7 @@
     ttsVoice?: string;
     ttsRate?: number;
     ttsProvider?: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
+    platformInfo?: PlatformInfo | null;
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -62,6 +70,10 @@
     }) => void;
     onBack: () => void;
   } = $props();
+
+  // Derived platform availability (default to true if info not yet loaded)
+  let systemAudioAvailable = $derived(platformInfo?.system_audio_available ?? true);
+  let offlineModeAvailable = $derived(platformInfo?.offline_mode_available ?? true);
 
   // Local copies for editing
   let localMode: OperatingMode = $state('cloud');
@@ -445,12 +457,14 @@
               <button
                 class="voice-option"
                 class:active={localMode === 'offline'}
-                onclick={() => { localMode = 'offline'; modeDropdownOpen = false; }}
+                class:disabled={!offlineModeAvailable}
+                onclick={() => { if (offlineModeAvailable) { localMode = 'offline'; modeDropdownOpen = false; } }}
+                disabled={!offlineModeAvailable}
               >
                 <span class="voice-option-check">{localMode === 'offline' ? '✓' : ''}</span>
                 <div class="voice-option-content">
                   <span class="voice-option-name">Offline (MLX)</span>
-                  <span class="voice-option-desc">~1s latency, works offline</span>
+                  <span class="voice-option-desc">{offlineModeAvailable ? '~3s latency, works offline' : 'macOS only'}</span>
                 </div>
               </button>
             </div>
@@ -567,8 +581,8 @@
               <span class="mode-desc">Capture from your mic</span>
             </div>
           </label>
-          <label class="mode-card source-card" class:active={localAudioSource === 'system'}>
-            <input type="radio" name="audio-source" value="system" bind:group={localAudioSource} disabled={isTranslating} />
+          <label class="mode-card source-card" class:active={localAudioSource === 'system'} class:disabled={!systemAudioAvailable}>
+            <input type="radio" name="audio-source" value="system" bind:group={localAudioSource} disabled={isTranslating || !systemAudioAvailable} />
             <div class="mode-card-content">
               <span class="mode-name">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
@@ -576,11 +590,11 @@
                 </svg>
                 System Audio
               </span>
-              <span class="mode-desc">Capture computer audio</span>
+              <span class="mode-desc">{systemAudioAvailable ? 'Capture computer audio' : 'macOS only'}</span>
             </div>
           </label>
-          <label class="mode-card source-card" class:active={localAudioSource === 'both'}>
-            <input type="radio" name="audio-source" value="both" bind:group={localAudioSource} disabled={isTranslating} />
+          <label class="mode-card source-card" class:active={localAudioSource === 'both'} class:disabled={!systemAudioAvailable}>
+            <input type="radio" name="audio-source" value="both" bind:group={localAudioSource} disabled={isTranslating || !systemAudioAvailable} />
             <div class="mode-card-content">
               <span class="mode-name">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
@@ -591,7 +605,7 @@
                 </svg>
                 Both
               </span>
-              <span class="mode-desc">Mic + system audio</span>
+              <span class="mode-desc">{systemAudioAvailable ? 'Mic + system audio' : 'macOS only'}</span>
             </div>
           </label>
         </div>
@@ -927,7 +941,7 @@
           </div>
           <div class="about-name">Auralis</div>
           <div class="about-version">v{appVersion}</div>
-          <div class="about-desc">Real-time speech translation for macOS.</div>
+          <div class="about-desc">Real-time speech translation.</div>
         </div>
 
         <!-- Update section -->
@@ -1100,6 +1114,16 @@
   .mode-card {
     flex: 1;
     cursor: pointer;
+  }
+
+  .mode-card.disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .mode-card.disabled .mode-card-content {
+    border-color: var(--border);
+    background: transparent;
   }
 
   .mode-card input[type="radio"] {
@@ -1590,6 +1614,15 @@
 
   .voice-option.active {
     background: var(--accent-dim);
+  }
+
+  .voice-option.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .voice-option.disabled:hover {
+    background: transparent;
   }
 
   .voice-option-check {

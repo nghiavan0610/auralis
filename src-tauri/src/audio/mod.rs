@@ -2,14 +2,20 @@
 //!
 //! Supports multiple audio sources:
 //! - Microphone via cpal
-//! - System audio via macOS ScreenCaptureKit
+//! - System audio via macOS ScreenCaptureKit (macOS only)
 //! - Both (merged)
 
 #[cfg(target_os = "macos")]
 pub mod system_audio;
 
+#[cfg(not(target_os = "macos"))]
+pub mod system_audio_stub;
+
 #[cfg(target_os = "macos")]
 pub use system_audio::SystemAudioCapture;
+
+#[cfg(not(target_os = "macos"))]
+pub use system_audio_stub::SystemAudioCapture;
 
 /// Target sample rate for all audio output (Soniox / Whisper require 16kHz)
 pub const TARGET_SAMPLE_RATE: u32 = 16000;
@@ -54,12 +60,26 @@ fn bytes_to_i16(bytes: &[u8]) -> Vec<i16> {
         .collect()
 }
 
-/// Open macOS System Settings to the relevant privacy pane.
+/// Open system privacy settings to the relevant pane.
 pub fn open_privacy_settings(pane: &str) {
-    let url = match pane {
-        "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
-        "screen" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-        _ => return,
-    };
-    let _ = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "macos")]
+    {
+        let url = match pane {
+            "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+            "screen" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            _ => return,
+        };
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let scheme = match pane {
+            "microphone" => "ms-settings:privacy-microphone",
+            _ => return,
+        };
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", scheme])
+            .spawn();
+    }
 }

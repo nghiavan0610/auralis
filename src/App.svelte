@@ -6,6 +6,14 @@
   import { SonioxClient } from './js/soniox';
   import type { ConnectionStatus } from './js/soniox';
   import type { Segment, OperatingMode, TranslationType, AudioSource } from './types';
+
+  // Platform info from Rust backend
+  interface PlatformInfo {
+    os: string;
+    system_audio_available: boolean;
+    offline_mode_available: boolean;
+  }
+  let platformInfo: PlatformInfo | null = $state(null);
   import ControlBar from './components/ControlBar.svelte';
   import Transcript from './components/Transcript.svelte';
   import SettingsView from './components/SettingsView.svelte';
@@ -442,6 +450,13 @@
   onMount(async () => {
     await loadSettings();
 
+    // Fetch platform capabilities from the Rust backend
+    try {
+      platformInfo = await invoke<PlatformInfo>('get_platform_info');
+    } catch {
+      platformInfo = { os: 'unknown', system_audio_available: true, offline_mode_available: true };
+    }
+
     const audioDataUnlisten = await listen<ArrayBuffer>('audio-data', (event) => {
       if (sonioxClient && mode === 'cloud') {
         sonioxClient.sendAudio(event.payload);
@@ -544,6 +559,7 @@
     {isPinned}
     audioSource={audioSource}
     ttsEnabled={ttsEnabled}
+    {platformInfo}
     onToggleRecord={handleToggleRecord}
     onOpenSettings={handleOpenSettings}
     onClear={handleClear}
@@ -585,6 +601,7 @@
     ttsVoice={ttsVoice}
     ttsRate={ttsRate}
     ttsProvider={ttsProvider}
+    {platformInfo}
     onSave={handleSettingsSave}
     onBack={handleSettingsBack}
   />

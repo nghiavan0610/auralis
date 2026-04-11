@@ -2,6 +2,12 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import type { AudioSource } from '../types';
 
+  interface PlatformInfo {
+    os: string;
+    system_audio_available: boolean;
+    offline_mode_available: boolean;
+  }
+
   let {
     isTranslating = false,
     statusText = 'Ready',
@@ -9,6 +15,7 @@
     isPinned = false,
     audioSource = 'microphone',
     ttsEnabled = false,
+    platformInfo = null as PlatformInfo | null,
     onToggleRecord,
     onOpenSettings,
     onClear,
@@ -22,6 +29,7 @@
     isPinned?: boolean;
     audioSource?: AudioSource;
     ttsEnabled?: boolean;
+    platformInfo?: PlatformInfo | null;
     onToggleRecord: () => void;
     onOpenSettings: () => void;
     onClear: () => void;
@@ -29,6 +37,8 @@
     onSetAudioSource: (source: AudioSource) => void;
     onToggleTts: () => void;
   } = $props();
+
+  let systemAudioAvailable = $derived(platformInfo?.system_audio_available ?? true);
 
   const appWindow = getCurrentWindow();
 
@@ -72,23 +82,25 @@
           <line x1="8" y1="23" x2="16" y2="23"/>
         </svg>
       </button>
-      <button class="src-btn" class:active={audioSource === 'system'} onclick={() => onSetAudioSource('system')} title="System audio">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-        </svg>
-      </button>
-      <button class="src-btn" class:active={audioSource === 'both'} onclick={() => onSetAudioSource('both')} title="Mic + system">
-        <svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-          <path d="M16 10v2a7 7 0 0 1-14 0v-2"/>
-          <line x1="9" y1="19" x2="9" y2="23"/>
-          <line x1="5" y1="23" x2="13" y2="23"/>
-          <path d="M19 9.5a3.5 3.5 0 0 1 0 5" opacity="0.55"/>
-          <path d="M23 6.5a7 7 0 0 1 0 11" opacity="0.55"/>
-        </svg>
-      </button>
+      {#if systemAudioAvailable}
+        <button class="src-btn" class:active={audioSource === 'system'} onclick={() => onSetAudioSource('system')} title="System audio">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+        </button>
+        <button class="src-btn" class:active={audioSource === 'both'} onclick={() => onSetAudioSource('both')} title="Mic + system">
+          <svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M16 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="9" y1="19" x2="9" y2="23"/>
+            <line x1="5" y1="23" x2="13" y2="23"/>
+            <path d="M19 9.5a3.5 3.5 0 0 1 0 5" opacity="0.55"/>
+            <path d="M23 6.5a7 7 0 0 1 0 11" opacity="0.55"/>
+          </svg>
+        </button>
+      {/if}
     </div>
 
     <button class="start-btn" class:recording={isTranslating} onclick={onToggleRecord} title={isTranslating ? 'Stop recording' : 'Start recording'}>

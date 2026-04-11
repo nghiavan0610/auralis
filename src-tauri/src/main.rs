@@ -56,6 +56,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             // Core
             greet,
+            get_platform_info,
             // Audio streaming
             start_audio_capture,
             stop_audio_capture,

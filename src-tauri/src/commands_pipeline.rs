@@ -28,27 +28,48 @@ fn log(msg: &str) {
 // Python executable discovery
 // ---------------------------------------------------------------------------
 
+/// Return the path to the Python interpreter inside the venv.
+fn venv_python_path() -> std::path::PathBuf {
+    let config_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let venv_dir = config_dir.join("auralis").join("mlx-env");
+    #[cfg(target_os = "windows")]
+    { venv_dir.join("Scripts").join("python.exe") }
+    #[cfg(not(target_os = "windows"))]
+    { venv_dir.join("bin").join("python3") }
+}
+
+/// Return the path to pip inside the venv.
+fn venv_pip_path() -> std::path::PathBuf {
+    let config_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let venv_dir = config_dir.join("auralis").join("mlx-env");
+    #[cfg(target_os = "windows")]
+    { venv_dir.join("Scripts").join("pip.exe") }
+    #[cfg(not(target_os = "windows"))]
+    { venv_dir.join("bin").join("pip3") }
+}
+
 /// Find a suitable Python 3 executable.
 fn find_python() -> String {
-    if let Some(config_dir) = dirs::config_dir() {
-        let venv_python = config_dir
-            .join("auralis")
-            .join("mlx-env")
-            .join("bin")
-            .join("python3");
-        if venv_python.exists() {
-            log(&format!("Using venv python: {:?}", venv_python));
-            return venv_python.to_string_lossy().to_string();
+    let venv_python = venv_python_path();
+    if venv_python.exists() {
+        log(&format!("Using venv python: {:?}", venv_python));
+        return venv_python.to_string_lossy().to_string();
+    }
+
+    if cfg!(target_os = "macos") {
+        if std::path::Path::new("/opt/homebrew/bin/python3").exists() {
+            log("Using Homebrew python3");
+            return "/opt/homebrew/bin/python3".to_string();
         }
+        log("Using system python3 (fallback)");
+        "python3".to_string()
+    } else if cfg!(target_os = "windows") {
+        log("Using python (Windows fallback)");
+        "python".to_string()
+    } else {
+        log("Using python3 (fallback)");
+        "python3".to_string()
     }
-
-    if std::path::Path::new("/opt/homebrew/bin/python3").exists() {
-        log("Using Homebrew python3");
-        return "/opt/homebrew/bin/python3".to_string();
-    }
-
-    log("Using system python3 (fallback)");
-    "python3".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -135,8 +156,13 @@ pub async fn start_local_pipeline(
     );
 
     // --- Spawn the Python sidecar ---
-    let path_env = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    #[cfg(target_os = "macos")]
+    let path_env = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".to_string();
+    #[cfg(not(target_os = "macos"))]
+    let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| "/tmp".to_string());
 
     let mut cmd = Command::new(&python);
     cmd.arg(&script_path)
@@ -557,9 +583,7 @@ pub async fn stop_local_pipeline(
 /// Check whether the offline Python environment is set up and ready.
 #[tauri::command]
 pub async fn check_offline_ready() -> Result<serde_json::Value, String> {
-    let config_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let venv_dir = config_dir.join("auralis").join("mlx-env");
-    let venv_python = venv_dir.join("bin").join("python3");
+    let venv_python = venv_python_path();
 
     let venv_exists = venv_python.exists();
 
@@ -632,8 +656,8 @@ pub async fn setup_offline_environment(
 
     emit_progress("creating-venv", "Virtual environment created", 30);
 
-    let venv_python = venv_dir.join("bin").join("python3");
-    let venv_pip = venv_dir.join("bin").join("pip3");
+    let venv_python = venv_python_path();
+    let venv_pip = venv_pip_path();
 
     emit_progress("upgrading-pip", "Upgrading pip...", 35);
 
@@ -721,22 +745,54 @@ pub async fn setup_offline_environment(
 
 /// Find a system Python 3 (not the venv one).
 fn find_system_python() -> Result<String, String> {
-    let candidates = [
-        "/opt/homebrew/bin/python3",
-        "/usr/local/bin/python3",
-        "/usr/bin/python3",
-    ];
-
-    for path in &candidates {
-        if std::path::Path::new(path).exists() {
-            return Ok(path.to_string());
+    #[cfg(target_os = "macos")]
+    {
+        let candidates = [
+            "/opt/homebrew/bin/python3",
+            "/usr/local/bin/python3",
+            "/usr/bin/python3",
+        ];
+        for path in &candidates {
+            if std::path::Path::new(path).exists() {
+                return Ok(path.to_string());
+            }
         }
     }
 
-    let output = Command::new("which")
-        .arg("python3")
-        .output();
+    #[cfg(target_os = "windows")]
+    {
+        let candidates = ["python", "python3", "py"];
+        for path in &candidates {
+            if Command::new(*path)
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+            {
+                log(&format!("Found system python: {}", path));
+                return Ok(path.to_string());
+            }
+        }
+    }
 
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let candidates = ["/usr/local/bin/python3", "/usr/bin/python3"];
+        for path in &candidates {
+            if std::path::Path::new(path).exists() {
+                return Ok(path.to_string());
+            }
+        }
+    }
+
+    // Fallback: try to locate via system PATH
+    #[cfg(target_os = "windows")]
+    let (finder, arg) = ("where", "python");
+    #[cfg(not(target_os = "windows"))]
+    let (finder, arg) = ("which", "python3");
+
+    let output = Command::new(finder).arg(arg).output();
     if let Ok(out) = output {
         if out.status.success() {
             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
