@@ -1,135 +1,118 @@
-<div align="center">
-  <img src="assets/banner.png" alt="Auralis" width="640" />
-</div>
+<p align="center">
+  <img src="assets/banner.png" alt="Auralis — Real-time Speech Translation">
+</p>
 
-# Auralis
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/nghiavan0610/auralis?color=green&label=release" alt="Latest Release">
+  <img src="https://img.shields.io/badge/built_with-Tauri-orange?logo=tauri" alt="Built with Tauri">
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-black?logo=apple" alt="macOS">
+  <img src="https://img.shields.io/badge/Windows-10%2F11-blue?logo=windows" alt="Windows">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
+  <img src="https://img.shields.io/github/stars/nghiavan0610/auralis?style=flat&color=yellow" alt="Stars">
+</p>
 
-Compact overlay app for real-time speech translation with dual-mode architecture: **cloud** (Soniox, ~150ms) and **offline** (MLX Whisper + Opus-MT, ~3s).
+**Auralis** is a real-time speech translation overlay built with Tauri. It captures audio from your microphone or system, transcribes it, and displays translations in a compact glassmorphism window — with no intermediary server involved.
 
-Features a 600x400 borderless glassmorphism window with custom control bar, system audio capture (YouTube, meetings), and two-way translation.
+> 📖 Installation guides: [macOS (EN)](docs/installation_guide.md) · [macOS (VI)](docs/installation_guide_vi.md) · [Windows (EN)](docs/installation_guide_win.md) · [Windows (VI)](docs/installation_guide_win_vi.md)
 
-## Architecture
+---
+
+## How It Works
 
 ```
-+----------------------------------------------------------+
-|            Svelte 5 Frontend (Overlay UI)                 |
-|  ControlBar | Transcript | SettingsView                   |
-+----------------------------------------------------------+
-|  Rust/Tauri Backend                                       |
-|  Audio Capture (cpal + ScreenCaptureKit)                  |
-|    - Microphone, System audio, or Both (mixed)           |
-|  Settings persistence | Python sidecar management         |
-+----------------------------------------------------------+
-|  Cloud Mode (Soniox)    |  Offline Mode (Python MLX)     |
-|  WebSocket STT+translate |  MLX Whisper -> Opus-MT        |
-|  ~150-300ms latency     |  ~3s latency                    |
-+----------------------------------------------------------+
+System Audio / Mic → 16kHz PCM → Cloud (Soniox) or Offline (MLX Whisper) → Overlay UI
+                                                                          ↓ (optional)
+                                                                  TTS (Edge/Google/ElevenLabs) → 🔊
 ```
 
-### Audio Sources
+| Feature | Detail |
+|---------|--------|
+| **Latency** | ~150ms (Cloud) · ~3s (Offline) |
+| **Languages** | 12 supported, one-way & two-way |
+| **Cost** | ~$0.12/hr (Cloud) · Free (Offline) |
+| **TTS** | 4 providers (Web Speech, Edge, Google, ElevenLabs) |
+| **Platform** | macOS (ARM + Intel) · Windows |
+| **Auto-Update** | ✅ Built-in, check & install from Settings |
 
-- **Microphone** - Default input via cpal
-- **System audio** - All system output via macOS ScreenCaptureKit (excludes app's own audio to prevent TTS feedback)
-- **Both** - Mic + system audio mixed by averaging PCM samples
+---
 
-### Offline Pipeline Optimizations
+## Features
 
-- **1.5s chunks / 1.0s stride** - Fast sliding window transcription
-- **Exact prefix dedup** - Handles 1-word boundary overlaps from sliding window
-- **Garbage suppression** - Detects and filters Whisper hallucination loops
-- **Stale audio flush** - Drains buffer accumulated during model loading (~16s)
-- **initial_prompt context** - Feeds previous transcript tail for better continuity
-- **Configurable endpoint delay** - Silence threshold before translation
+### ☁️ Dual Mode — Cloud & Offline
 
-## Quick Start
+| Mode | Speed | Quality | Cost | Internet |
+|------|-------|---------|------|----------|
+| **Cloud** (Soniox) | ~150ms | High | ~$0.12/hr | Required |
+| **Offline** (MLX Whisper + Opus-MT) | ~3s | Good | Free | Not needed |
 
-### Prerequisites
+Offline mode runs 100% on-device using MLX Whisper for speech recognition and Opus-MT for translation. Models are downloaded automatically (~5 GB).
 
-- **Rust**: 1.70+
-- **Node.js**: 18+
-- **macOS** (primary target)
+### 🎙️ System Audio Capture
 
-### Install & Run
+Capture audio directly from:
+- **Microphone** — your voice
+- **System audio** — YouTube, Zoom, meetings (macOS via ScreenCaptureKit)
+- **Both** — mixed mic + system audio
 
-```bash
-git clone <repo-url> && cd auralis
-npm install
-npm run tauri dev
-```
+### 🔄 Two-Way Translation
 
-### Cloud Mode (Soniox)
+Translate conversations between two languages simultaneously — ideal for bilingual meetings.
 
-1. Get a free API key at [soniox.com](https://soniox.com/)
-2. Click the gear icon to open Settings
-3. Select **Cloud** mode, enter API key, choose languages
-4. Click the record button to start
+- **One-way**: Source → Target (e.g., English → Vietnamese)
+- **Two-way**: Language A ↔ Language B — the app auto-detects who is speaking and translates to the other language
 
-### Offline Mode (MLX)
+### 🎙️ TTS Narration
 
-1. Open Settings (gear icon)
-2. Select **Offline** mode
-3. Click **Setup Offline Mode** - the app creates the Python environment and installs dependencies automatically
-4. Click the record button to start
+Read translations aloud — 4 providers:
 
-### Audio Source
+| | Web Speech | Edge TTS | Google Cloud | ElevenLabs |
+|-|-----------|----------|-------------|------------|
+| **Cost** | Free | Free | Free tier | ~$5/mo+ |
+| **Quality** | Basic | Natural | High | Premium |
+| **Setup** | Built-in | None | API key | API key |
 
-In Settings, choose from:
-- **Microphone** - Your voice input
-- **System** - YouTube, meetings, any app audio (requires Screen Recording permission)
-- **Both** - Mixed mic + system audio
+### 🖥️ Compact Overlay
 
-## Supported Languages
+600×400 borderless glassmorphism window that stays on top of other apps. Drag it anywhere, resize as needed. Adjustable opacity and font size for presentations.
 
-English, Vietnamese, Spanish, French, German, Chinese, Japanese, Korean, Portuguese, Russian, Arabic, Hindi
+---
 
-Two-way translation available (auto-detects source language).
+## Privacy
+
+**Your audio never touches our servers — because there are none.**
+
+- App connects **directly** to APIs you configure — no relay, no middleman
+- **You own your API keys** — stored locally, never transmitted elsewhere
+- **No account, no telemetry, no analytics** — zero tracking
+
+---
 
 ## Tech Stack
 
-- **Backend**: Rust, Tokio, Tauri 2, cpal, ScreenCaptureKit (macOS)
-- **Frontend**: Svelte 5 (runes), Vite, TypeScript
-- **Cloud STT+Translation**: Soniox WebSocket API (stt-rt-v4)
-- **Offline STT**: MLX Whisper (whisper-large-v3-turbo)
-- **Offline Translation**: Helsinki-NLP Opus-MT (via HuggingFace Transformers)
-- **Python Sidecar**: stdin/stdout JSON protocol, configurable chunk/stride/endpoint-delay
+- **[Tauri 2](https://tauri.app/)** — Rust backend + Svelte 5 frontend
+- **[ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit)** — macOS system audio
+- **[cpal](https://github.com/RustAudio/cpal)** — Cross-platform microphone
+- **[Soniox](https://soniox.com)** — Real-time STT + translation (cloud mode)
+- **[MLX Whisper](https://github.com/ml-explore/mlx-examples)** — On-device speech recognition
+- **[Opus-MT](https://huggingface.co/Helsinki-NLP)** — On-device translation
+- **[Edge TTS](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/index-text-to-speech)** — Free neural TTS
+- **[Google Cloud TTS](https://cloud.google.com/text-to-speech)** — High-quality TTS
+- **[ElevenLabs](https://elevenlabs.io)** — Premium TTS
 
-## Project Structure
+---
 
-```
-auralis/
-├── src-tauri/              # Tauri app
-│   └── src/
-│       ├── main.rs              # App entry point
-│       ├── lib.rs               # Command registration
-│       ├── commands_audio.rs    # Audio streaming (mic/system/both)
-│       ├── commands_settings.rs # Settings persistence
-│       ├── commands_pipeline.rs # Offline pipeline + audio write loop
-│       ├── audio/
-│       │   ├── mod.rs           # PCM conversion, audio mixing
-│       │   └── system_audio.rs  # ScreenCaptureKit system audio
-│       └── state.rs             # App state + settings
-├── src/                    # Svelte frontend
-│   ├── App.svelte               # Main overlay shell
-│   ├── app.css                  # Glassmorphism design system
-│   ├── types.ts                 # Shared TypeScript types
-│   ├── js/
-│   │   ├── soniox.ts            # Soniox WebSocket client
-│   │   └── lang.ts              # Language name mappings
-│   └── components/
-│       ├── ControlBar.svelte    # Drag region + window controls
-│       ├── Transcript.svelte    # Single/dual view transcript
-│       ├── SettingsView.svelte  # Settings overlay with tabs
-│       └── ModelDownloader.svelte # Offline setup widget
-├── scripts/
-│   └── local_pipeline.py   # Offline MLX + Opus-MT Python sidecar
-└── Cargo.toml
-```
-
-## Running Tests
+## Build from Source
 
 ```bash
-cargo test
+git clone https://github.com/nghiavan0610/auralis.git
+cd auralis
+npm install
+npm run tauri build
 ```
+
+Requires: Rust (stable), Node.js 18+, macOS 13+ or Windows 10+.
+
+---
 
 ## License
 
