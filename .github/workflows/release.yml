@@ -97,6 +97,10 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
+          # Strip 'v' prefix from tag for asset filenames (Tauri uses version without 'v')
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+
           # Get the previous tag (if any)
           PREV_TAG=$(git tag --sort=-creatordate | head -2 | tail -1)
           if [ "$PREV_TAG" = "${{ github.ref_name }}" ]; then
@@ -128,7 +132,7 @@ jobs:
 
           # Add install links
           BODY="${BODY}---\n\n"
-          BODY="${BODY}📥 **Download**: [macOS (Apple Silicon)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${{ github.ref_name }}_aarch64.dmg) · [macOS (Intel)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${{ github.ref_name }}_x64.dmg) · [Windows](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${{ github.ref_name }}_x64-setup.exe)\n\n"
+          BODY="${BODY}📥 **Download**: [macOS (Apple Silicon)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${VER}_aarch64.dmg) · [macOS (Intel)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${VER}_x64.dmg) · [Windows](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Auralis_${VER}_x64-setup.exe)\n\n"
           BODY="${BODY}📖 **Installation guides**: [macOS (EN)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide.md) · [macOS (VI)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide_vi.md) · [Windows (EN)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide_win.md) · [Windows (VI)](https://github.com/${{ github.repository }}/blob/main/docs/installation_guide_win_vi.md)"
 
           echo "body<<EOF" >> $GITHUB_OUTPUT
