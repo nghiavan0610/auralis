@@ -32,13 +32,28 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
+    "resources": {
+      "../scripts/*": "scripts/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "entitlements": "Entitlements.plist",
+      "minimumSystemVersion": "13.0"
+    }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "PLACEHOLDER_REPLACE_AFTER_KEY_GENERATION",
+      "endpoints": [
+        "https://github.com/nghiavan0610/auralis/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

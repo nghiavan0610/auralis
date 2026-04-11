@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            rust-target: aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+            rust-target: x86_64-apple-darwin
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust-target }}
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.rust-target }}
+
+      - name: Build Auralis (macOS ${{ matrix.target }})
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Auralis ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.rust-target }}
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build Auralis (Windows)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Auralis ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+
+  publish-release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 -c "
+          import glob, json, os
+          tag = os.environ['GITHUB_REF_NAME']
+          notes = 'Auralis ' + tag
+          # Find signature files to determine platforms
+          platforms = {}
+          for sig in glob.glob('**/*.tar.gz.sig', recursive=True) + glob.glob('**/*.app.tar.gz.sig', recursive=True):
+              base = sig.replace('.sig', '')
+              url = f'https://github.com/nghiavan0610/auralis/releases/download/{tag}/{os.path.basename(base)}'
+              with open(sig) as f:
+                  sig_content = f.read().strip()
+              platforms[os.path.basename(base)] = {'url': url, 'signature': sig_content}
+          for sig in glob.glob('**/*.exe.sig', recursive=True) + glob.glob('**/*.msi.sig', recursive=True):
+              base = sig.replace('.sig', '')
+              url = f'https://github.com/nghiavan0610/auralis/releases/download/{tag}/{os.path.basename(base)}'
+              with open(sig) as f:
+                  sig_content = f.read().strip()
+              platforms[os.path.basename(base)] = {'url': url, 'signature': sig_content}
+          latest = {
+              'version': tag,
+              'notes': notes,
+              'pub_date': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+              'platforms': platforms
+          }
+          with open('latest.json', 'w') as f:
+              json.dump(latest, f, indent=2)
+          print(json.dumps(latest, indent=2))
+          "
+
+      - name: Upload latest.json to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} latest.json --clobber

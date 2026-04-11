@@ -3,6 +3,8 @@
   import type { OperatingMode, TranslationType, AudioSource } from '../types';
   import { getLangLabel } from '../js/lang';
   import { tts } from '../js/tts';
+  import { check } from '@tauri-apps/plugin-updater';
+  import { relaunch } from '@tauri-apps/plugin-process';
 
   interface PlatformInfo {
     os: string;
@@ -102,9 +104,9 @@
 
   // Update checker state
   let appVersion = $state('...');
-  let updateStatus: 'idle' | 'checking' | 'up-to-date' | 'available' | 'error' = $state('idle');
+  let updateStatus: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'error' = $state('idle');
   let latestVersion = $state('');
-  let updateUrl = $state('');
+  let updateProgress = $state(0);
 
   // Slider works with integer (30–100), opacity is 0.3–1.0
   let localOpacityPercent = $state(88);
@@ -252,23 +254,48 @@
   async function checkForUpdates() {
     updateStatus = 'checking';
     try {
-      const resp = await fetch('https://gitlab.com/api/v4/projects/auralis3%2Fauralis/releases?per_page=1');
-      if (!resp.ok) throw new Error('not_public');
-      const data = await resp.json();
-      if (!Array.isArray(data) || data.length === 0) {
-        updateStatus = 'up-to-date';
-        return;
-      }
-      latestVersion = (data[0].tag_name as string).replace(/^v/, '');
-      updateUrl = data[0]._links?.self ?? `https://gitlab.com/auralis3/auralis/-/releases`;
-      if (latestVersion !== appVersion) {
+      const update = await check();
+      if (update?.available) {
+        latestVersion = update.version;
         updateStatus = 'available';
       } else {
         updateStatus = 'up-to-date';
       }
     } catch {
-      // Private repo or no releases yet — show up-to-date since there's nothing to update to
       updateStatus = 'up-to-date';
+    }
+  }
+
+  async function downloadAndInstallUpdate() {
+    updateStatus = 'downloading';
+    updateProgress = 0;
+    try {
+      const update = await check();
+      if (!update?.available) {
+        updateStatus = 'up-to-date';
+        return;
+      }
+      let contentLength = 0;
+      let downloaded = 0;
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            contentLength = event.data.contentLength ?? 0;
+            break;
+          case 'Progress':
+            downloaded += event.data.chunkLength;
+            if (contentLength > 0) {
+              updateProgress = Math.round((downloaded / contentLength) * 100);
+            }
+            break;
+          case 'Finished':
+            updateProgress = 100;
+            break;
+        }
+      });
+      await relaunch();
+    } catch {
+      updateStatus = 'error';
     }
   }
 
@@ -987,9 +1014,15 @@
                   <span class="update-label" style="color: var(--accent);">Update available</span>
                   <span class="update-sub">v{latestVersion} is available</span>
                 </div>
-                <a href={updateUrl} target="_blank" rel="noopener noreferrer" class="btn-primary" style="text-decoration: none; font-size: var(--font-size-xs); padding: 4px 14px; border-radius: 14px;">
-                  Download
-                </a>
+                <button onclick={downloadAndInstallUpdate} class="btn-primary" style="font-size: var(--font-size-xs); padding: 4px 14px; border-radius: 14px;">
+                  Update
+                </button>
+              {:else if updateStatus === 'downloading'}
+                <div class="update-spinner"></div>
+                <div class="update-text">
+                  <span class="update-label" style="color: var(--accent);">Downloading update...</span>
+                  <span class="update-sub">{updateProgress}%</span>
+                </div>
               {:else}
                 <div class="update-status-icon">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1004,7 +1037,7 @@
                 </div>
               {/if}
             </div>
-            {#if updateStatus !== 'checking'}
+            {#if updateStatus !== 'checking' && updateStatus !== 'downloading'}
               <button class="btn-icon update-refresh" onclick={checkForUpdates} title="Check for updates">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="23 4 23 10 17 10"/>
