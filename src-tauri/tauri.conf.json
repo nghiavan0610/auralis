@@ -50,7 +50,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER_REPLACE_AFTER_KEY_GENERATION",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwRkEwQjg3NTZDOTM1RTcKUldUbk5jbFdod3Y2a0t2aE15SWRPOFhERFlUWW9LeUpDNURqbUtRUGZPRkEyL2ErV0RpcGhyV3IK",
       "endpoints": [
         "https://github.com/nghiavan0610/auralis/releases/latest/download/latest.json"
       ]
