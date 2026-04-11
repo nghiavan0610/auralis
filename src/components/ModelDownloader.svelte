@@ -39,18 +39,25 @@
     setting = false;
   }
 
-  onMount(async () => {
-    const unlisten = await listen<{ step: string; message: string; progress: number }>(
+  onMount(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    listen<{ step: string; message: string; progress: number }>(
       'offline-setup-progress',
       (event) => {
         progressStep = event.payload.step;
         progressMessage = event.payload.message;
         progress = event.payload.progress;
       }
-    );
+    ).then((unlisten) => {
+      unlistenFn = unlisten;
+    });
 
-    await checkReady();
-    return unlisten;
+    checkReady();
+
+    return () => {
+      unlistenFn?.();
+    };
   });
 </script>
 

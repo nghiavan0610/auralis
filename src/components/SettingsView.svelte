@@ -127,13 +127,19 @@
     }
   });
 
+  // Track previous provider to only reset voice on actual change
+  let prevProvider: string = $state('');
+
   // Load voices when TTS tab is opened or provider changes
   $effect(() => {
     const provider = localTtsProvider; // Read to create reactive dependency
     if (activeTab === 'tts') {
       tts.setProvider(provider);
-      // Reset voice selection when provider changes
-      localTtsVoice = '';
+      // Only reset voice when provider actually changes (not on tab open)
+      if (prevProvider && prevProvider !== provider) {
+        localTtsVoice = '';
+      }
+      prevProvider = provider;
       tts.getVoices().then((v) => {
         // Sort: target language voices first, then others by lang
         const target = localTarget.toLowerCase();
@@ -596,6 +602,7 @@
             <span class="slider-card-label">Endpoint Delay</span>
             <span class="slider-card-value">{localEndpointDelay.toFixed(1)}s</span>
           </div>
+          <p class="slider-card-desc">How long to wait after silence before finalizing a transcript segment. Lower for faster output, higher to avoid cutting off pauses.</p>
           <input
             type="range"
             min="5"
@@ -893,6 +900,7 @@
             <span class="slider-card-label">Speed</span>
             <span class="slider-card-value">{localTtsRate.toFixed(1)}x</span>
           </div>
+          <p class="slider-card-desc">Playback speed for spoken translations. 1.0x is normal speed.</p>
           <input
             type="range"
             min="5"
@@ -1366,6 +1374,13 @@
     font-variant-numeric: tabular-nums;
     min-width: 40px;
     text-align: right;
+  }
+
+  .slider-card-desc {
+    font-size: var(--font-size-xs);
+    color: var(--text-dim);
+    margin: 0;
+    line-height: 1.4;
   }
 
   /* Slider track */
