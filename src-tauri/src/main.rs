@@ -11,6 +11,7 @@ mod commands_pipeline;
 mod commands_edge_tts;
 mod commands_google_tts;
 mod commands_elevenlabs_tts;
+mod commands_transcripts;
 mod edge_tts;
 mod google_tts;
 mod elevenlabs_tts;
@@ -25,6 +26,7 @@ use commands_pipeline::*;
 use commands_edge_tts::*;
 use commands_google_tts::*;
 use commands_elevenlabs_tts::*;
+use commands_transcripts::*;
 
 // Import Manager trait for window access
 use tauri::Manager;
@@ -83,6 +85,11 @@ fn main() {
             // ElevenLabs TTS
             elevenlabs_tts_synthesize,
             elevenlabs_tts_list_voices,
+            // Transcripts
+            save_transcript,
+            list_transcripts,
+            load_transcript,
+            delete_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

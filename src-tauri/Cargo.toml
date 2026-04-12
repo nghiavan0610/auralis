@@ -23,6 +23,7 @@ tracing = "0.1"
 url = "2.5"
 futures = "0.3"
 dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
 auralis = { path = ".." }
 

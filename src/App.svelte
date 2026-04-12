@@ -18,6 +18,7 @@
   import ControlBar from './components/ControlBar.svelte';
   import Transcript from './components/Transcript.svelte';
   import SettingsView from './components/SettingsView.svelte';
+  import SavedTranscripts from './components/SavedTranscripts.svelte';
   import { tts } from './js/tts';
 
   // ---------------------------------------------------------------------------
@@ -53,7 +54,7 @@
   let provisionalLang = $state('');
 
   // UI state
-  let currentView: 'main' | 'settings' = $state('main');
+  let currentView: 'main' | 'settings' | 'saved' = $state('main');
   let isPinned = $state(false);
 
   // Offline setup state (lives here so it persists across tab/view switches)
@@ -117,6 +118,12 @@
   // ---------------------------------------------------------------------------
 
   function addSegment(original: string, detectedLang: string, targetLang: string): void {
+    // Filter out segments in unexpected languages
+    if (translationType === 'two_way') {
+      if (detectedLang !== sourceLanguage && detectedLang !== targetLanguage) return;
+    } else {
+      if (detectedLang !== sourceLanguage) return;
+    }
     segmentIdCounter++;
     segments.push({
       id: segmentIdCounter,
@@ -377,6 +384,10 @@
     currentView = 'main';
   }
 
+  function handleOpenSaved() {
+    currentView = 'saved';
+  }
+
   function handleSettingsSave(settings: {
     mode: OperatingMode;
     soniox_api_key: string;
@@ -415,7 +426,23 @@
     currentView = 'main';
   }
 
-  function handleClear() {
+  async function handleClear() {
+    // Auto-save before clearing if there are segments
+    if (segments.length > 0) {
+      try {
+        await invoke('save_transcript', {
+          segments: segments.map((s) => ({
+            original: s.original,
+            translated: s.translated,
+            detected_lang: s.detectedLang,
+            target_lang: s.targetLang,
+            timestamp: s.timestamp,
+          })),
+        });
+      } catch (err) {
+        console.warn('Failed to auto-save transcript:', err);
+      }
+    }
     segments.length = 0;
     segments = segments;
     provisionalText = '';
@@ -587,6 +614,21 @@
   });
 
   onDestroy(() => {
+    // Auto-save transcript on close
+    if (segments.length > 0) {
+      invoke('save_transcript', {
+        segments: segments.map((s) => ({
+          original: s.original,
+          translated: s.translated,
+          detected_lang: s.detectedLang,
+          target_lang: s.targetLang,
+          timestamp: s.timestamp,
+        })),
+      }).catch((err) => {
+        console.warn('Failed to auto-save transcript on close:', err);
+      });
+    }
+
     if (sonioxClient) {
       sonioxClient.disconnect();
       sonioxClient = null;
@@ -610,6 +652,7 @@
     {updateAvailable}
     onToggleRecord={handleToggleRecord}
     onOpenSettings={handleOpenSettings}
+    onOpenSaved={handleOpenSaved}
     onClear={handleClear}
     onTogglePin={handleTogglePin}
     onSetAudioSource={handleSetAudioSource}
@@ -631,7 +674,7 @@
     {provisionalLang}
     fontSize={displayFontSize}
   />
-{:else}
+{:else if currentView === 'settings'}
   <SettingsView
     {mode}
     {sonioxApiKey}
@@ -656,6 +699,10 @@
     bind:offlineReady
     onSave={handleSettingsSave}
     onBack={handleSettingsBack}
+  />
+{:else}
+  <SavedTranscripts
+    onBack={() => { currentView = 'main'; }}
   />
 {/if}
 

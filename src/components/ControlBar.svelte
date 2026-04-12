@@ -23,6 +23,7 @@
     onTogglePin,
     onSetAudioSource,
     onToggleTts,
+    onOpenSaved,
   }: {
     isTranslating?: boolean;
     statusText?: string;
@@ -38,6 +39,7 @@
     onTogglePin: () => void;
     onSetAudioSource: (source: AudioSource) => void;
     onToggleTts: () => void;
+    onOpenSaved: () => void;
   } = $props();
 
   let systemAudioAvailable = $derived(platformInfo?.system_audio_available ?? true);
@@ -124,14 +126,21 @@
       <span class="tts-label">TTS</span>
     </button>
 
-    <div class="bar-sep"></div>
+    <div class="history-group">
+      <button class="bar-btn" onclick={onOpenSaved} title="Saved transcripts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+      </button>
 
-    <button class="bar-btn" onclick={onClear} title="Clear transcript">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="3 6 5 6 21 6"/>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-      </svg>
-    </button>
+      <button class="bar-btn" onclick={onClear} title="Clear transcript">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
   <!-- Right: Window controls -->
@@ -325,6 +334,14 @@
   .tts-btn:hover { border-color: rgba(255, 255, 255, 0.15); color: var(--text-secondary); }
   .tts-btn.active { background: rgba(99, 140, 255, 0.12); border-color: rgba(99, 140, 255, 0.4); color: var(--accent); }
   .tts-btn.active:hover { background: rgba(99, 140, 255, 0.18); }
+
+  /* History + Clear group */
+  .history-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 8px;
+  }
 
   @keyframes pulse {
     0%, 100% { opacity: 1; }

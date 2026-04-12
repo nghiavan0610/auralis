@@ -373,7 +373,7 @@ export class SonioxClient {
       num_channels: 1,
       enable_endpoint_detection: true,
       max_endpoint_delay_ms: Math.round((this.config.endpoint_delay ?? 1.5) * 1000),
-      enable_language_identification: true,
+      enable_language_identification: this.config.translation_type === "two_way",
     };
 
     // Language hints.
