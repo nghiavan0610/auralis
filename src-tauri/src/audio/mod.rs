@@ -17,9 +17,6 @@ pub use system_audio::SystemAudioCapture;
 #[cfg(not(target_os = "macos"))]
 pub use system_audio_stub::SystemAudioCapture;
 
-/// Target sample rate for all audio output (Soniox / Whisper require 16kHz)
-pub const TARGET_SAMPLE_RATE: u32 = 16000;
-
 /// Convert f32 audio samples to PCM s16le bytes.
 pub fn f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8> {
     samples

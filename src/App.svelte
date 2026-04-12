@@ -56,6 +56,12 @@
   let currentView: 'main' | 'settings' = $state('main');
   let isPinned = $state(false);
 
+  // Offline setup state (lives here so it persists across tab/view switches)
+  let offlineSetupProgress = $state(0);
+  let offlineSetupMessage = $state('');
+  let offlineSetupStep = $state('');
+  let offlineReady = $state(false);
+
   // Apply display settings as CSS custom properties
   $effect(() => {
     document.documentElement.style.setProperty('--app-opacity', String(displayOpacity));
@@ -469,9 +475,17 @@
       // Silently ignore — user can check manually in About
     }
 
-    const audioDataUnlisten = await listen<ArrayBuffer>('audio-data', (event) => {
+    // Preload offline pipeline so models are ready when user clicks Start
+    if (mode === 'offline') {
+      invoke('preload_pipeline').catch(() => {
+        // Silently ignore — will load on demand when user clicks Start
+      });
+    }
+
+    const audioDataUnlisten = await listen<number[]>('audio-data', (event) => {
       if (sonioxClient && mode === 'cloud') {
-        sonioxClient.sendAudio(event.payload);
+        const pcm = new Uint8Array(event.payload);
+        sonioxClient.sendAudio(pcm);
       }
     });
 
@@ -488,32 +502,39 @@
             addSegment(text, detectedLang, target);
           }
         } else if (data.type === 'result') {
-          // Full result with translation — replace all pending segments with one clean entry
+          // Full result with translation — update the matching pending segment in place
           const original = (data.original ?? '').trim();
           const translated = (data.translated ?? '').trim();
           const detectedLang = data.source_lang ?? sourceLanguage;
           const target = data.target_lang ?? targetLanguage;
 
           if (original && translated) {
-            // Remove all pending segments (they were intermediate chunks)
-            // and add one clean translated segment
-            for (let i = segments.length - 1; i >= 0; i--) {
-              if (segments[i].status === 'pending') segments.splice(i, 1);
+            // Find the pending segment that matches this original text and update it
+            const pendingIdx = segments.findIndex(
+              (s) => s.status === 'pending' && s.original === original
+            );
+            if (pendingIdx !== -1) {
+              segments[pendingIdx].translated = translated;
+              segments[pendingIdx].status = 'translated';
+              segments[pendingIdx].targetLang = target;
+              segments = segments;
+            } else {
+              // No matching pending segment — add as translated
+              segmentIdCounter++;
+              segments.push({
+                id: segmentIdCounter,
+                original,
+                translated,
+                detectedLang,
+                targetLang: target,
+                status: 'translated',
+                timestamp: Date.now(),
+              });
+              if (segments.length > displayMaxLines) {
+                segments.splice(0, segments.length - displayMaxLines);
+              }
+              segments = segments;
             }
-            segmentIdCounter++;
-            segments.push({
-              id: segmentIdCounter,
-              original,
-              translated,
-              detectedLang,
-              targetLang: target,
-              status: 'translated',
-              timestamp: Date.now(),
-            });
-            if (segments.length > displayMaxLines) {
-              segments.splice(0, segments.length - displayMaxLines);
-            }
-            segments = segments;
             // Speak translated text if TTS is enabled
             if (translated && target) {
               speakTranslation(translated, target);
@@ -547,6 +568,20 @@
       pipelineResultUnlisten,
       pipelineStatusUnlisten
     );
+
+    // Offline setup progress — persists across view/tab switches
+    const offlineSetupUnlisten = await listen<{ step: string; message: string; progress: number }>(
+      'offline-setup-progress',
+      (event) => {
+        offlineSetupProgress = event.payload.progress;
+        offlineSetupMessage = event.payload.message;
+        offlineSetupStep = event.payload.step;
+        if (event.payload.progress >= 100) {
+          offlineReady = true;
+        }
+      }
+    );
+    unlisteners.push(offlineSetupUnlisten);
 
     statusMessage = 'Ready';
   });
@@ -615,6 +650,10 @@
     ttsRate={ttsRate}
     ttsProvider={ttsProvider}
     {platformInfo}
+    bind:offlineSetupProgress
+    bind:offlineSetupMessage
+    bind:offlineSetupStep
+    bind:offlineReady
     onSave={handleSettingsSave}
     onBack={handleSettingsBack}
   />

@@ -162,13 +162,13 @@ impl AuralisState {
     }
 
     /// Get the current operating mode
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub async fn mode(&self) -> String {
         self.settings.lock().await.mode.clone()
     }
 
     /// Get the current audio source
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub async fn audio_source(&self) -> String {
         self.settings.lock().await.audio_source.clone()
     }
@@ -176,11 +176,6 @@ impl AuralisState {
     /// Get the current translation type
     pub async fn translation_type(&self) -> String {
         self.settings.lock().await.translation_type.clone()
-    }
-
-    /// Get the current endpoint delay (seconds)
-    pub async fn endpoint_delay(&self) -> f64 {
-        self.settings.lock().await.endpoint_delay
     }
 }
 

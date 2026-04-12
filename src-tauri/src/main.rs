@@ -60,7 +60,6 @@ fn main() {
         .manage(AuralisState::new())
         .invoke_handler(tauri::generate_handler![
             // Core
-            greet,
             get_platform_info,
             // Audio streaming
             start_audio_capture,
@@ -69,6 +68,7 @@ fn main() {
             get_settings,
             save_settings,
             // Offline pipeline
+            preload_pipeline,
             start_local_pipeline,
             stop_local_pipeline,
             // Offline setup

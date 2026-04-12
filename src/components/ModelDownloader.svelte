@@ -1,14 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
 
-  let offlineReady = $state(false);
+  let {
+    progress = $bindable(0),
+    progressMessage = $bindable(''),
+    progressStep = $bindable(''),
+    offlineReady = $bindable(false),
+  }: {
+    progress?: number;
+    progressMessage?: string;
+    progressStep?: string;
+    offlineReady?: boolean;
+  } = $props();
+
   let checking = $state(true);
   let setting = $state(false);
-  let progress = $state(0);
-  let progressMessage = $state('');
-  let progressStep = $state('');
   let errorMsg = $state('');
 
   async function checkReady(): Promise<void> {
@@ -40,24 +47,7 @@
   }
 
   onMount(() => {
-    let unlistenFn: (() => void) | undefined;
-
-    listen<{ step: string; message: string; progress: number }>(
-      'offline-setup-progress',
-      (event) => {
-        progressStep = event.payload.step;
-        progressMessage = event.payload.message;
-        progress = event.payload.progress;
-      }
-    ).then((unlisten) => {
-      unlistenFn = unlisten;
-    });
-
     checkReady();
-
-    return () => {
-      unlistenFn?.();
-    };
   });
 </script>
 
@@ -87,7 +77,7 @@
     </div>
   {:else}
     <div class="setup-prompt">
-      <p>Offline mode requires downloading MLX Whisper and Opus-MT models (~3 GB).</p>
+      <p>Offline mode requires downloading MLX Whisper and Gemma-3 LLM (~3 GB).</p>
       <button class="btn-primary" onclick={handleSetup}>
         Setup Offline Mode
       </button>

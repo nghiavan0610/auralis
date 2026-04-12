@@ -106,56 +106,45 @@ fn find_pipeline_script() -> Result<std::path::PathBuf, String> {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Start the local (offline) translation pipeline.
-///
-/// Accepts an optional `source` parameter ("microphone", "system", "both").
-/// Defaults to "microphone" if not specified.
+/// Preload the Python pipeline (spawn process + load models) without starting audio.
+/// Called at app startup so models are ready when the user clicks Start.
 #[tauri::command]
-pub async fn start_local_pipeline(
+pub async fn preload_pipeline(
     state: State<'_, AuralisState>,
     app_handle: AppHandle,
-    source: Option<String>,
 ) -> Result<(), String> {
-    let source = source.unwrap_or_else(|| "microphone".to_string());
-
-    // --- Guard: already running? ---
-    if state.is_streaming.load(Ordering::Relaxed) {
-        return Err("Pipeline is already running".to_string());
+    // Already preloaded?
+    if state.pipeline_ready.load(Ordering::Relaxed) {
+        log("Pipeline already preloaded, skipping");
+        return Ok(());
     }
 
-    // --- Guard: stale pipeline from previous session? (force-reset) ---
+    // Stale pipeline? Kill it first.
     {
         let mut guard = state.pipeline.lock().map_err(|e| e.to_string())?;
         if let Some(mut ps) = guard.take() {
-            tracing::warn!("Stale pipeline found, killing previous process (PID={})", ps.child.id());
+            tracing::warn!("Killing stale pipeline (PID={})", ps.child.id());
             drop(ps.stdin);
             let _ = ps.child.kill();
             let _ = ps.child.wait();
         }
     }
 
-    // --- Languages from settings ---
     let source_lang = state.source_language().await;
     let target_lang = state.target_language().await;
     let translation_type = state.translation_type().await;
-    let endpoint_delay = state.endpoint_delay().await;
 
-    log(&format!(
-        "start_local_pipeline: {} -> {} (audio source: {}, translation: {})",
-        source_lang, target_lang, source, translation_type
-    ));
+    log(&format!("preload_pipeline: {} -> {}", source_lang, target_lang));
 
-    // --- Locate script & python ---
     let script_path = find_pipeline_script()?;
     let python = find_python();
-    tracing::info!("Pipeline: python={}, script={}", python, script_path.display());
 
     let _ = app_handle.emit(
         "pipeline-status",
-        serde_json::json!({"type": "status", "message": "Starting Python pipeline..."}),
+        serde_json::json!({"type": "status", "message": "Preloading models..."}),
     );
 
-    // --- Spawn the Python sidecar ---
+    // Spawn Python
     #[cfg(target_os = "macos")]
     let path_env = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".to_string();
     #[cfg(not(target_os = "macos"))]
@@ -166,15 +155,12 @@ pub async fn start_local_pipeline(
 
     let mut cmd = Command::new(&python);
     cmd.arg(&script_path)
-        .arg("--source-lang")
-        .arg(&source_lang)
-        .arg("--target-lang")
-        .arg(&target_lang);
+        .arg("--source-lang").arg(&source_lang)
+        .arg("--target-lang").arg(&target_lang);
     if translation_type == "two_way" {
         cmd.arg("--two-way");
     }
-    cmd.arg("--endpoint-delay").arg(endpoint_delay.to_string());
-    tracing::info!("Spawning: {:?}", cmd);
+
     let mut child = cmd
         .env("PATH", path_env)
         .env("HOME", &home)
@@ -185,22 +171,13 @@ pub async fn start_local_pipeline(
         .spawn()
         .map_err(|e| format!("Failed to start pipeline: {}", e))?;
 
-    log(&format!("Python process spawned, PID={}", child.id()));
+    log(&format!("Python preloaded, PID={}", child.id()));
 
-    let _ = app_handle.emit(
-        "pipeline-status",
-        serde_json::json!({
-            "type": "status",
-            "message": format!("Python started (PID={}), loading models...", child.id())
-        }),
-    );
-
-    // --- Take handles from the child ---
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
     let stdin_handle = child.stdin.take().ok_or("Failed to get stdin")?;
 
-    // --- Read stdout and emit events ---
+    // stdout reader — sets pipeline_ready on "ready"
     let app_stdout = app_handle.clone();
     let stdout_ready = state.pipeline_ready.clone();
     std::thread::spawn(move || {
@@ -210,53 +187,35 @@ pub async fn start_local_pipeline(
             match line {
                 Ok(line) if !line.is_empty() => {
                     log(&format!("stdout: {}", &line));
-
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                        let msg_type = json
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("unknown");
-
+                        let msg_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
                         match msg_type {
-                            "original" => {
-                                let _ = app_stdout.emit("pipeline-result", &line);
-                            }
-                            "result" => {
-                                let _ = app_stdout.emit("pipeline-result", &line);
-                            }
-                            "status" => {
-                                let _ = app_stdout.emit("pipeline-status", &line);
-                            }
+                            "status" => { let _ = app_stdout.emit("pipeline-status", &line); }
                             "ready" => {
                                 stdout_ready.store(true, Ordering::Relaxed);
                                 let _ = app_stdout.emit(
                                     "pipeline-status",
-                                    serde_json::json!({"type":"status","message":"Pipeline ready"}),
+                                    serde_json::json!({"type":"status","message":"Models loaded"}),
                                 );
                             }
-                            "done" => {
-                                log("Received done signal from pipeline");
-                                break;
+                            "result" | "original" => {
+                                let _ = app_stdout.emit("pipeline-result", &line);
                             }
+                            "done" => break,
                             _ => {
                                 let _ = app_stdout.emit("pipeline-result", &line);
                             }
                         }
-                    } else {
-                        let _ = app_stdout.emit("pipeline-result", &line);
                     }
                 }
                 Ok(_) => {}
-                Err(e) => {
-                    log(&format!("stdout read error: {}", e));
-                    break;
-                }
+                Err(_) => break,
             }
         }
-        log("stdout reader thread ended");
+        log("preload stdout reader ended");
     });
 
-    // --- Read stderr and forward as status ---
+    // stderr reader
     let app_stderr = app_handle.clone();
     std::thread::spawn(move || {
         use std::io::BufRead;
@@ -274,12 +233,219 @@ pub async fn start_local_pipeline(
                 Err(_) => break,
             }
         }
-        log("stderr reader thread ended");
     });
+
+    // Store pipeline state
+    {
+        let mut guard = state.pipeline.lock().map_err(|e| e.to_string())?;
+        *guard = Some(PipelineState {
+            child,
+            stdin: stdin_handle,
+        });
+    }
+
+    log("Preload spawned, models loading in background");
+    Ok(())
+}
+
+/// Start the local (offline) translation pipeline.
+///
+/// Accepts an optional `source` parameter ("microphone", "system", "both").
+/// Defaults to "microphone" if not specified.
+///
+/// If the pipeline was preloaded (via `preload_pipeline`), reuses the existing
+/// Python process and just starts audio capture.
+#[tauri::command]
+pub async fn start_local_pipeline(
+    state: State<'_, AuralisState>,
+    app_handle: AppHandle,
+    source: Option<String>,
+) -> Result<(), String> {
+    let source = source.unwrap_or_else(|| "microphone".to_string());
+
+    // --- Guard: already streaming? ---
+    if state.is_streaming.load(Ordering::Relaxed) {
+        return Err("Pipeline is already running".to_string());
+    }
+
+    // --- Check if pipeline was preloaded and is ready ---
+    let preloaded = state.pipeline_ready.load(Ordering::Relaxed)
+        && state.pipeline.lock().map_err(|e| e.to_string())?.is_some();
+
+    if !preloaded {
+        // No preloaded pipeline — check for stale one, then spawn fresh
+        {
+            let mut guard = state.pipeline.lock().map_err(|e| e.to_string())?;
+            if let Some(mut ps) = guard.take() {
+                tracing::warn!("Stale pipeline found, killing previous process (PID={})", ps.child.id());
+                drop(ps.stdin);
+                let _ = ps.child.kill();
+                let _ = ps.child.wait();
+            }
+        }
+
+        // --- Languages from settings ---
+        let source_lang = state.source_language().await;
+        let target_lang = state.target_language().await;
+        let translation_type = state.translation_type().await;
+
+        log(&format!(
+            "start_local_pipeline: {} -> {} (audio source: {}, translation: {})",
+            source_lang, target_lang, source, translation_type
+        ));
+
+        // --- Locate script & python ---
+        let script_path = find_pipeline_script()?;
+        let python = find_python();
+        tracing::info!("Pipeline: python={}, script={}", python, script_path.display());
+
+        let _ = app_handle.emit(
+            "pipeline-status",
+            serde_json::json!({"type": "status", "message": "Starting Python pipeline..."}),
+        );
+
+        // --- Spawn the Python sidecar ---
+        #[cfg(target_os = "macos")]
+        let path_env = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".to_string();
+        #[cfg(not(target_os = "macos"))]
+        let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| "/tmp".to_string());
+
+        let mut cmd = Command::new(&python);
+        cmd.arg(&script_path)
+            .arg("--source-lang")
+            .arg(&source_lang)
+            .arg("--target-lang")
+            .arg(&target_lang);
+        if translation_type == "two_way" {
+            cmd.arg("--two-way");
+        }
+        tracing::info!("Spawning: {:?}", cmd);
+        let mut child = cmd
+            .env("PATH", path_env)
+            .env("HOME", &home)
+            .env("TOKENIZERS_PARALLELISM", "false")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to start pipeline: {}", e))?;
+
+        log(&format!("Python process spawned, PID={}", child.id()));
+
+        let _ = app_handle.emit(
+            "pipeline-status",
+            serde_json::json!({
+                "type": "status",
+                "message": format!("Python started (PID={}), loading models...", child.id())
+            }),
+        );
+
+        // --- Take handles from the child ---
+        let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+        let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+        let stdin_handle = child.stdin.take().ok_or("Failed to get stdin")?;
+
+        // --- Read stdout and emit events ---
+        let app_stdout = app_handle.clone();
+        let stdout_ready = state.pipeline_ready.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(line) if !line.is_empty() => {
+                        log(&format!("stdout: {}", &line));
+
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                            let msg_type = json
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+
+                            match msg_type {
+                                "original" => {
+                                    let _ = app_stdout.emit("pipeline-result", &line);
+                                }
+                                "result" => {
+                                    let _ = app_stdout.emit("pipeline-result", &line);
+                                }
+                                "status" => {
+                                    let _ = app_stdout.emit("pipeline-status", &line);
+                                }
+                                "ready" => {
+                                    stdout_ready.store(true, Ordering::Relaxed);
+                                    let _ = app_stdout.emit(
+                                        "pipeline-status",
+                                        serde_json::json!({"type":"status","message":"Pipeline ready"}),
+                                    );
+                                }
+                                "done" => {
+                                    log("Received done signal from pipeline");
+                                    break;
+                                }
+                                _ => {
+                                    let _ = app_stdout.emit("pipeline-result", &line);
+                                }
+                            }
+                        } else {
+                            let _ = app_stdout.emit("pipeline-result", &line);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        log(&format!("stdout read error: {}", e));
+                        break;
+                    }
+                }
+            }
+            log("stdout reader thread ended");
+        });
+
+        // --- Read stderr and forward as status ---
+        let app_stderr = app_handle.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        log(&format!("stderr: {}", line));
+                        let escaped = line.replace('\\', "\\\\").replace('"', "\\\"");
+                        let _ = app_stderr.emit(
+                            "pipeline-status",
+                            serde_json::json!({"type":"status","message": escaped}),
+                        );
+                    }
+                    Err(_) => break,
+                }
+            }
+            log("stderr reader thread ended");
+        });
+
+        // Audio capture succeeded — now store pipeline state
+        {
+            let mut guard = state.pipeline.lock().map_err(|e| e.to_string())?;
+            *guard = Some(PipelineState {
+                child,
+                stdin: stdin_handle,
+            });
+        }
+    } else {
+        log("Reusing preloaded pipeline — skipping model loading");
+        let _ = app_handle.emit(
+            "pipeline-status",
+            serde_json::json!({"type":"status","message":"Models already loaded"}),
+        );
+    }
 
     // --- Start audio capture based on source ---
     state.is_streaming.store(true, Ordering::Relaxed);
-    state.pipeline_ready.store(false, Ordering::Relaxed);
+    if !preloaded {
+        state.pipeline_ready.store(false, Ordering::Relaxed);
+    }
     let pipeline = state.pipeline.clone();
     let pipeline_ready = state.pipeline_ready.clone();
     let stream_stop = state.stream_stop.clone();
@@ -397,8 +563,14 @@ pub async fn start_local_pipeline(
         Err(e) => {
             log(&format!("Audio capture failed, killing pipeline: {}", e));
             state.is_streaming.store(false, Ordering::Relaxed);
-            let _ = child.kill();
-            let _ = child.wait();
+            // Kill the pipeline process if one exists
+            let mut guard = state.pipeline.lock().map_err(|e2| e2.to_string())?;
+            if let Some(mut ps) = guard.take() {
+                drop(ps.stdin);
+                let _ = ps.child.kill();
+                let _ = ps.child.wait();
+            }
+            state.pipeline_ready.store(false, Ordering::Relaxed);
             return Err(e);
         }
     };
@@ -529,15 +701,6 @@ pub async fn start_local_pipeline(
         );
     });
 
-    // Audio capture succeeded — now store pipeline state
-    {
-        let mut guard = state.pipeline.lock().map_err(|e| e.to_string())?;
-        *guard = Some(PipelineState {
-            child,
-            stdin: stdin_handle,
-        });
-    }
-
     log("Pipeline started successfully");
     Ok(())
 }
@@ -589,7 +752,7 @@ pub async fn check_offline_ready() -> Result<serde_json::Value, String> {
 
     let packages_installed = if venv_exists {
         let output = Command::new(&venv_python)
-            .args(["-c", "import mlx_whisper; import transformers; import numpy; import sentencepiece; print('ok')"])
+            .args(["-c", "import mlx_whisper; import mlx_lm; import transformers; import numpy; import sentencepiece; print('ok')"])
             .output()
             .map_err(|e| format!("Failed to run python check: {}", e))?;
         output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "ok"
@@ -667,7 +830,7 @@ pub async fn setup_offline_environment(
 
     emit_progress("upgrading-pip", "pip upgraded", 40);
 
-    let packages = ["mlx-whisper", "transformers", "numpy", "sentencepiece", "protobuf"];
+    let packages = ["mlx-whisper", "mlx-lm", "transformers", "numpy", "sentencepiece", "protobuf"];
 
     for (i, pkg) in packages.iter().enumerate() {
         let pct_start = 40 + ((i as u8) * 20);
@@ -728,7 +891,7 @@ pub async fn setup_offline_environment(
     emit_progress("verifying", "Verifying installation...", 95);
 
     let check = Command::new(&venv_python)
-        .args(["-c", "import mlx_whisper; import transformers; import numpy; print('ok')"])
+        .args(["-c", "import mlx_whisper; import mlx_lm; import transformers; import numpy; print('ok')"])
         .output()
         .map_err(|e| format!("Verification failed: {}", e))?;
 

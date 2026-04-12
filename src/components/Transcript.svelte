@@ -62,8 +62,11 @@
   }
 
   $effect(() => {
-    segments;
-    provisionalText;
+    // Explicitly read reactive values so Svelte tracks deep changes
+    const len = segments.length;
+    const last = len > 0 ? segments[len - 1] : null;
+    if (last) { last.original; last.translated; last.status; }
+    const prov = provisionalText;
     scrollToBottom(leftContainer);
     scrollToBottom(rightContainer);
   });

@@ -31,6 +31,10 @@
     ttsProvider = 'webspeech' as 'webspeech' | 'edge' | 'google' | 'elevenlabs',
     elevenlabsApiKey = '',
     platformInfo = null as PlatformInfo | null,
+    offlineSetupProgress = $bindable(0),
+    offlineSetupMessage = $bindable(''),
+    offlineSetupStep = $bindable(''),
+    offlineReady = $bindable(false),
     onSave,
     onBack,
   }: {
@@ -52,6 +56,10 @@
     ttsRate?: number;
     ttsProvider?: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
     platformInfo?: PlatformInfo | null;
+    offlineSetupProgress?: number;
+    offlineSetupMessage?: string;
+    offlineSetupStep?: string;
+    offlineReady?: boolean;
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -532,7 +540,12 @@
           </div>
         {:else}
           <div class="field">
-            <ModelDownloader />
+            <ModelDownloader
+              bind:progress={offlineSetupProgress}
+              bind:progressMessage={offlineSetupMessage}
+              bind:progressStep={offlineSetupStep}
+              bind:offlineReady={offlineReady}
+            />
           </div>
         {/if}
 
