@@ -42,6 +42,9 @@
   let googleApiKey = $state('');
   let elevenlabsApiKey = $state('');
   let sonioxApiKey = $state('');
+  let summaryProvider: 'gemma' | 'claude' | 'gpt' = $state('gemma');
+  let claudeApiKey = $state('');
+  let openaiApiKey = $state('');
   let isTranslating = $state(false);
   let statusMessage = $state('Ready');
   let errorMessage = $state('');
@@ -186,6 +189,9 @@
         tts_provider?: string;
         google_api_key?: string;
         elevenlabs_api_key?: string;
+        summary_provider?: string;
+        claude_api_key?: string;
+        openai_api_key?: string;
       }>('get_settings');
 
       if (settings.mode === 'cloud' || settings.mode === 'offline') {
@@ -216,6 +222,11 @@
       sonioxApiKey = settings.soniox_api_key;
       sourceLanguage = settings.source_language;
       targetLanguage = settings.target_language;
+      if (settings.summary_provider === 'gemma' || settings.summary_provider === 'claude' || settings.summary_provider === 'gpt') {
+        summaryProvider = settings.summary_provider;
+      }
+      claudeApiKey = settings.claude_api_key ?? '';
+      openaiApiKey = settings.openai_api_key ?? '';
     } catch (err) {
       console.warn('Failed to load settings, using defaults:', err);
     }
@@ -240,6 +251,9 @@
         tts_provider: ttsProvider,
         google_api_key: googleApiKey,
         elevenlabs_api_key: elevenlabsApiKey,
+        summary_provider: summaryProvider,
+        claude_api_key: claudeApiKey,
+        openai_api_key: openaiApiKey,
       },
     });
   }
@@ -405,11 +419,17 @@
     tts_provider: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
     google_api_key: string;
     elevenlabs_api_key: string;
+    summary_provider: string;
+    claude_api_key: string;
+    openai_api_key: string;
   }) {
     mode = settings.mode;
     sonioxApiKey = settings.soniox_api_key;
     googleApiKey = settings.google_api_key;
     elevenlabsApiKey = settings.elevenlabs_api_key;
+    summaryProvider = (settings.summary_provider as 'gemma' | 'claude' | 'gpt') ?? 'gemma';
+    claudeApiKey = settings.claude_api_key;
+    openaiApiKey = settings.openai_api_key;
     sourceLanguage = settings.source_language;
     targetLanguage = settings.target_language;
     translationType = settings.translation_type;
@@ -430,7 +450,7 @@
     // Auto-save before clearing if there are segments
     if (segments.length > 0) {
       try {
-        await invoke('save_transcript', {
+        const savedFilename = await invoke<string>('save_transcript', {
           segments: segments.map((s) => ({
             original: s.original,
             translated: s.translated,
@@ -439,6 +459,10 @@
             timestamp: s.timestamp,
           })),
         });
+
+        // Auto-generate summary in the background
+        invoke('generate_summary', { filename: savedFilename, tier: 'free' })
+          .catch((err) => console.warn('Failed to auto-generate summary:', err));
       } catch (err) {
         console.warn('Failed to auto-save transcript:', err);
       }
@@ -692,6 +716,9 @@
     ttsVoice={ttsVoice}
     ttsRate={ttsRate}
     ttsProvider={ttsProvider}
+    summaryProvider={summaryProvider}
+    claudeApiKey={claudeApiKey}
+    openaiApiKey={openaiApiKey}
     {platformInfo}
     bind:offlineSetupProgress
     bind:offlineSetupMessage

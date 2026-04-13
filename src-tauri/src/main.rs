@@ -90,6 +90,13 @@ fn main() {
             list_transcripts,
             load_transcript,
             delete_transcript,
+            rename_transcript,
+            // Summaries
+            generate_summary,
+            load_summary,
+            delete_summary,
+            check_summary,
+            get_subscription_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

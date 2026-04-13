@@ -56,6 +56,24 @@ pub struct Settings {
     /// ElevenLabs API key
     #[serde(default)]
     pub elevenlabs_api_key: String,
+    /// Summary provider: "auto", "gemma", "claude", or "gpt"
+    #[serde(default = "default_summary_provider")]
+    pub summary_provider: String,
+    /// Anthropic API key for Claude summaries
+    #[serde(default)]
+    pub claude_api_key: String,
+    /// OpenAI API key for GPT summaries
+    #[serde(default)]
+    pub openai_api_key: String,
+    /// Subscription tier: "free" or "pro"
+    #[serde(default = "default_subscription_tier")]
+    pub subscription_tier: String,
+    /// Number of summaries generated this month (for Free tier limit)
+    #[serde(default)]
+    pub summaries_this_month: u32,
+    /// Last month when summary count was reset (YYYY-MM format)
+    #[serde(default)]
+    pub last_summary_reset: String,
 }
 
 fn default_translation_type() -> String {
@@ -94,6 +112,14 @@ fn default_tts_provider() -> String {
     "webspeech".to_string()
 }
 
+fn default_summary_provider() -> String {
+    "gemma".to_string()
+}
+
+fn default_subscription_tier() -> String {
+    "free".to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -113,6 +139,12 @@ impl Default for Settings {
             tts_provider: default_tts_provider(),
             google_api_key: String::new(),
             elevenlabs_api_key: String::new(),
+            summary_provider: default_summary_provider(),
+            claude_api_key: String::new(),
+            openai_api_key: String::new(),
+            subscription_tier: default_subscription_tier(),
+            summaries_this_month: 0,
+            last_summary_reset: String::new(),
         }
     }
 }

@@ -30,6 +30,9 @@
     ttsRate = 1.0,
     ttsProvider = 'webspeech' as 'webspeech' | 'edge' | 'google' | 'elevenlabs',
     elevenlabsApiKey = '',
+    summaryProvider = 'gemma' as 'gemma' | 'claude' | 'gpt',
+    claudeApiKey = '',
+    openaiApiKey = '',
     platformInfo = null as PlatformInfo | null,
     offlineSetupProgress = $bindable(0),
     offlineSetupMessage = $bindable(''),
@@ -42,6 +45,9 @@
     sonioxApiKey?: string;
     googleApiKey?: string;
     elevenlabsApiKey?: string;
+    summaryProvider?: 'gemma' | 'claude' | 'gpt';
+    claudeApiKey?: string;
+    openaiApiKey?: string;
     sourceLanguage?: string;
     targetLanguage?: string;
     translationType?: TranslationType;
@@ -77,6 +83,9 @@
       tts_provider: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
       google_api_key: string;
       elevenlabs_api_key: string;
+      summary_provider: string;
+      claude_api_key: string;
+      openai_api_key: string;
     }) => void;
     onBack: () => void;
   } = $props();
@@ -104,17 +113,25 @@
   let localTtsProvider: 'webspeech' | 'edge' | 'google' | 'elevenlabs' = $state('webspeech');
   let localGoogleApiKey = $state('');
   let localElevenlabsApiKey = $state('');
+  let localClaudeApiKey = $state('');
+  let localOpenaiApiKey = $state('');
+
   let voiceDropdownOpen = $state(false);
   let modeDropdownOpen = $state(false);
   let providerDropdownOpen = $state(false);
   let availableVoices: Array<{ name: string; lang: string; local: boolean; gender?: string }> = $state([]);
-  let activeTab = $state<'translation' | 'display' | 'tts' | 'about'>('translation');
+  let activeTab = $state<'translation' | 'display' | 'tts' | 'subscription' | 'about'>('translation');
 
   // Update checker state
   let appVersion = $state('...');
   let updateStatus: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'error' = $state('idle');
   let latestVersion = $state('');
   let updateProgress = $state(0);
+
+  // Subscription state
+  let subscriptionTier = $state<'free' | 'pro'>('free');
+  let remainingSummaries = $state(5);
+  let resetDate = $state('');
 
   // Slider works with integer (30–100), opacity is 0.3–1.0
   let localOpacityPercent = $state(88);
@@ -140,6 +157,8 @@
     localTtsProvider = ttsProvider;
     localGoogleApiKey = googleApiKey;
     localElevenlabsApiKey = elevenlabsApiKey;
+    localClaudeApiKey = claudeApiKey;
+    localOpenaiApiKey = openaiApiKey;
   });
 
   // Load version and check for updates when About tab is opened
@@ -154,6 +173,19 @@
       }
     } else {
       aboutAutoChecked = false;
+    }
+  });
+
+  // Load subscription status when Subscription tab is opened
+  let subscriptionAutoChecked = $state(false);
+  $effect(() => {
+    if (activeTab === 'subscription') {
+      if (!subscriptionAutoChecked) {
+        subscriptionAutoChecked = true;
+        loadSubscriptionStatus();
+      }
+    } else {
+      subscriptionAutoChecked = false;
     }
   });
 
@@ -255,6 +287,9 @@
       tts_provider: localTtsProvider,
       google_api_key: localGoogleApiKey,
       elevenlabs_api_key: localElevenlabsApiKey,
+      summary_provider: 'gemma', // Always use gemma, tier determines access
+      claude_api_key: localClaudeApiKey,
+      openai_api_key: localOpenaiApiKey,
     });
   }
 
@@ -265,6 +300,28 @@
     } catch {
       appVersion = '0.1.0';
     }
+  }
+
+  async function loadSubscriptionStatus() {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const status = await invoke<{
+        tier: string;
+        remaining_summaries: number;
+        reset_date: string;
+      }>('get_subscription_status');
+      subscriptionTier = status.tier as 'free' | 'pro';
+      remainingSummaries = status.remaining_summaries;
+      resetDate = status.reset_date;
+    } catch (err) {
+      console.error('Failed to load subscription status:', err);
+    }
+  }
+
+  function handleUpgrade() {
+    // TODO: Open payment flow (Stripe, Paddle, etc.)
+    // For now, just show an alert
+    alert('Upgrade flow coming soon! For now, please contact support@auralis.app to upgrade.');
   }
 
   async function checkForUpdates() {
@@ -457,6 +514,9 @@
     </button>
     <button class="tab" class:active={activeTab === 'tts'} onclick={() => activeTab = 'tts'}>
       TTS
+    </button>
+    <button class="tab" class:active={activeTab === 'subscription'} onclick={() => activeTab = 'subscription'}>
+      Subscription
     </button>
     <button class="tab" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>
       About
@@ -976,6 +1036,91 @@
         </div>
       </div>
 
+    {:else if activeTab === 'subscription'}
+      <div class="settings-section">
+        <div class="section-label">Subscription</div>
+        <p class="section-desc">Choose your plan to unlock better AI and more features.</p>
+
+        {#if subscriptionTier === 'free' && remainingSummaries > 0}
+          <div style="margin-bottom: var(--space-md); padding: var(--space-sm); background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); font-size: var(--font-size-sm); color: var(--text-secondary);">
+            <strong style="color: var(--text-primary);">{remainingSummaries} summaries remaining</strong> this month. Resets on {resetDate}.
+          </div>
+        {:else if subscriptionTier === 'free' && remainingSummaries === 0}
+          <div style="margin-bottom: var(--space-md); padding: var(--space-sm); background: rgba(255, 77, 77, 0.1); border: 1px solid rgba(255, 77, 77, 0.2); border-radius: var(--radius-md); font-size: var(--font-size-sm); color: var(--text-secondary);">
+            <strong style="color: var(--danger);">Free tier limit reached</strong>. Upgrade to Pro for up to 500 summaries/month.
+          </div>
+        {/if}
+
+        <div style="display: grid; gap: var(--space-md); margin-top: var(--space-md);">
+          <!-- Free Tier -->
+          <div class="tier-card" class:current-tier={subscriptionTier === 'free'}>
+            <div class="tier-header">
+              <div class="tier-info">
+                <span class="tier-name">Free</span>
+                <span class="tier-price">$0/month</span>
+              </div>
+              <div class="tier-badge" class:free-badge={subscriptionTier === 'free'} class:pro-badge={subscriptionTier !== 'free'}>
+                {subscriptionTier === 'free' ? 'Current' : 'Downgrade'}
+              </div>
+            </div>
+            <div class="tier-features">
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span><strong>5 summaries</strong> per month</span>
+              </div>
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Gemma-3 offline model</span>
+              </div>
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Key points + overview</span>
+              </div>
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                <span style="color: var(--text-dim);">No action items or decisions</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pro Tier -->
+          <div class="tier-card pro-tier" class:current-tier={subscriptionTier === 'pro'}>
+            <div class="tier-header">
+              <div class="tier-info">
+                <span class="tier-name">Pro</span>
+                <span class="tier-price">$9/month</span>
+              </div>
+              <div class="tier-badge" class:free-badge={subscriptionTier !== 'pro'} class:pro-badge={subscriptionTier === 'pro'}>
+                {subscriptionTier === 'pro' ? 'Current' : 'Upgrade'}
+              </div>
+            </div>
+            <div class="tier-features">
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span><strong>Up to 500 summaries</strong> per month</span>
+              </div>
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span><strong>Advanced AI</strong> model</span>
+              </div>
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Action items + decisions</span>
+              </div>
+              <div class="tier-feature">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>No API keys needed</span>
+              </div>
+            </div>
+            {#if subscriptionTier !== 'pro'}
+              <button class="tier-upgrade-btn" onclick={handleUpgrade}>
+                Upgrade to Pro
+              </button>
+            {/if}
+          </div>
+        </div>
+      </div>
+
     {:else}
       <div class="settings-section">
         <div class="about-card">
@@ -1265,6 +1410,18 @@
     letter-spacing: 0.5px;
     color: #1a1b2e;
     background: var(--warning);
+    padding: 1px 6px;
+    border-radius: 4px;
+    line-height: 1.5;
+  }
+
+  .badge-optional {
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    background: var(--bg-secondary);
     padding: 1px 6px;
     border-radius: 4px;
     line-height: 1.5;
@@ -1719,5 +1876,119 @@
     margin-left: auto;
     font-size: 16px;
     flex-shrink: 0;
+  }
+
+  /* Subscription tier cards */
+  .tier-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    transition: border-color var(--transition-fast);
+  }
+
+  .tier-card:hover {
+    border-color: var(--border-hover);
+  }
+
+  .tier-card.pro-tier {
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(99, 102, 241, 0.05) 100%);
+    border-color: var(--accent);
+  }
+
+  .tier-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-md);
+  }
+
+  .tier-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .tier-name {
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .tier-price {
+    font-size: var(--font-size-sm);
+    color: var(--text-dim);
+  }
+
+  .tier-badge {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 12px;
+  }
+
+  .free-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+  }
+
+  .pro-badge {
+    background: var(--accent);
+    color: white;
+  }
+
+  .tier-features {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .tier-feature {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+  }
+
+  .tier-feature svg {
+    flex-shrink: 0;
+  }
+
+  .tier-upgrade-btn {
+    width: 100%;
+    margin-top: var(--space-md);
+    padding: 10px 16px;
+    background: var(--accent);
+    color: white;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+  }
+
+  .tier-upgrade-btn:hover {
+    opacity: 0.9;
+  }
+
+  .tier-card.current-tier {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(99, 102, 241, 0.05) 100%);
+  }
+
+  .tier-card.current-tier .tier-name {
+    color: var(--accent);
+  }
+
+  .tier-badge.free-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+  }
+
+  .tier-badge.pro-badge {
+    background: var(--accent);
+    color: white;
   }
 </style>

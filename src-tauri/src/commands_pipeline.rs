@@ -29,7 +29,7 @@ fn log(msg: &str) {
 // ---------------------------------------------------------------------------
 
 /// Return the path to the Python interpreter inside the venv.
-fn venv_python_path() -> std::path::PathBuf {
+pub fn venv_python_path() -> std::path::PathBuf {
     let config_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     let venv_dir = config_dir.join("auralis").join("mlx-env");
     #[cfg(target_os = "windows")]
@@ -49,7 +49,7 @@ fn venv_pip_path() -> std::path::PathBuf {
 }
 
 /// Find a suitable Python 3 executable.
-fn find_python() -> String {
+pub fn find_python() -> String {
     let venv_python = venv_python_path();
     if venv_python.exists() {
         log(&format!("Using venv python: {:?}", venv_python));
