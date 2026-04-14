@@ -4,6 +4,12 @@ export type OperatingMode = 'cloud' | 'offline';
 export type TranslationType = 'one_way' | 'two_way';
 export type AudioSource = 'microphone' | 'system' | 'both';
 
+/** Language auto-detection state for one-way translation */
+export interface DetectionState {
+  status: 'idle' | 'detecting' | 'detected' | 'uncertain' | 'error';
+  detectedLanguage?: string;
+}
+
 /** A paired original + translation segment */
 export interface Segment {
   id: number;

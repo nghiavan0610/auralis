@@ -3,6 +3,7 @@
   import TabNavigation from './TabNavigation.svelte';
   import Tooltip from './Tooltip.svelte';
   import Button from './Button.svelte';
+  import LanguageSelectorWithAutoDetect from './LanguageSelectorWithAutoDetect.svelte';
   import type { OperatingMode, TranslationType, AudioSource } from '../types';
   import { getLangLabel, SUPPORTED_LANGUAGES } from '../js/lang';
   import { tts } from '../js/tts';
@@ -346,9 +347,7 @@
     showRestoreSuccess = false;
 
     try {
-      console.log('[SettingsView] Starting purchase flow...');
       const status = await purchasePro();
-      console.log('[SettingsView] Purchase successful:', status);
       // Force sync to ensure latest status from RevenueCat
       const syncedStatus = await forceSync();
       // Update UI with new status
@@ -813,42 +812,25 @@
         {/if}
 
         <!-- 3. Languages -->
-        <div class="section-label">Languages</div>
-        <p class="section-desc">Set the source language (what you speak) and target language (what to translate into).</p>
-        <div class="language-row">
-          <div class="field">
-            <label for="src-lang">Source</label>
-            <select id="src-lang" bind:value={localSource} disabled={isTranslating}>
-              {#each SUPPORTED_LANGUAGES as lang}
-                <option value={lang.code}>{lang.flag} {lang.name}</option>
-              {/each}
-            </select>
-          </div>
-
-          <div class="lang-arrow">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 12h14M12 5l7 7-7 7"/>
-            </svg>
-          </div>
-
-          <div class="field">
-            <label for="tgt-lang">Target</label>
-            <select id="tgt-lang" bind:value={localTarget} disabled={isTranslating}>
-              {#each SUPPORTED_LANGUAGES as lang}
-                <option value={lang.code}>{lang.flag} {lang.name}</option>
-              {/each}
-            </select>
-          </div>
-        </div>
+        <LanguageSelectorWithAutoDetect
+          translationType={localTranslationType}
+          sourceLanguage={localSource}
+          targetLanguage={localTarget}
+          disabled={isTranslating}
+          onChange={(source, target) => {
+            localSource = source;
+            localTarget = target;
+          }}
+        />
 
         <!-- 4. Translation direction -->
         <div class="section-label">Direction</div>
-        <p class="section-desc">One way translates source to target. Two way auto-detects which language is spoken and translates to the other.</p>
+        <p class="section-desc">One-way auto-detects any language and translates to target. Two-way auto-detects between two configured languages.</p>
         <div class="direction-cards">
           <label class="mode-card" class:active={localTranslationType === 'one_way'}>
             <input type="radio" name="direction" value="one_way" bind:group={localTranslationType} disabled={isTranslating} />
             <div class="mode-card-content">
-              <Tooltip content="Best for: Lectures, presentations, meetings where everyone speaks one language" position="top">
+              <Tooltip content="Best for: Lectures, presentations, meetings with any language. Auto-detects spoken language and translates to target." position="top">
                 <span class="mode-name">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
                     <path d="M5 12h14"/>
@@ -856,13 +838,13 @@
                   One Way
                 </span>
               </Tooltip>
-              <span class="mode-desc">{getLangLabel(localSource)} → {getLangLabel(localTarget)}</span>
+              <span class="mode-desc">Auto-detect → {getLangLabel(localTarget)}</span>
             </div>
           </label>
           <label class="mode-card" class:active={localTranslationType === 'two_way'}>
             <input type="radio" name="direction" value="two_way" bind:group={localTranslationType} disabled={isTranslating} />
             <div class="mode-card-content">
-              <Tooltip content="Best for: Conversations, bilingual meetings, interviews. Auto-detects active speaker." position="top">
+              <Tooltip content="Best for: Conversations, bilingual meetings, interviews. Auto-detects which of two languages is spoken." position="top">
                 <span class="mode-name">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
                     <path d="M7 16l-4-4 4-4"/>
@@ -1016,7 +998,6 @@
             bind:value={localOpacityPercent}
             oninput={() => {
               localOpacity = Number(localOpacityPercent) / 100;
-              console.log('[SettingsView] Opacity changed:', { percent: localOpacityPercent, opacity: localOpacity });
             }}
             class="slider"
             style="--fill: {((localOpacityPercent - 30) / 70) * 100}%"
@@ -2349,6 +2330,11 @@
     display: flex;
     align-items: flex-end;
     gap: var(--space-sm);
+  }
+
+  /* Hide source language selector in one-way mode (auto-detect enabled) */
+  .language-row.one-way-mode .field:first-child {
+    display: none;
   }
 
   .lang-arrow {

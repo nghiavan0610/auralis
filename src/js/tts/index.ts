@@ -50,7 +50,6 @@ class TTSEngine {
           this.providers[name] = new ElevenLabsTTSProvider();
           break;
       }
-      console.log(`[TTS] Loaded provider: ${name}`);
     }
 
     // Clear any existing unload timer
@@ -77,8 +76,6 @@ class TTSEngine {
     this.unloadTimers[providerName] = setTimeout(() => {
       // Only unload if it's not the current provider
       if (this._provider !== providerName && this.providers[providerName]) {
-        console.log(`[TTS] Unloading inactive provider: ${providerName}`);
-
         // Cleanup the provider
         const provider = this.providers[providerName];
         if (provider && 'cleanup' in provider) {

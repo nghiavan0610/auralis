@@ -76,6 +76,14 @@
   let errorMessage = $state('');
   let sonioxConnectionStatus: ConnectionStatus | null = $state(null);
 
+  // Auto-detection state for one-way translation
+  let detectionState = $state<{
+    status: 'idle' | 'detecting' | 'detected' | 'uncertain' | 'error';
+    detectedLanguage?: string;
+  }>({
+    status: 'idle'
+  });
+
   // Segment-based transcript model
   let segments: Segment[] = $state([]);
   let segmentIdCounter = 0;
@@ -113,7 +121,6 @@
   // Apply display settings as CSS custom properties
   // Note: fontSize is passed directly to Transcript component, not set globally
   $effect(() => {
-    console.log('[Auralis] Updating display settings:', { opacity: displaySettings.opacity, fontSize: displaySettings.fontSize });
     const opacityValue = String(displaySettings.opacity);
     document.documentElement.style.setProperty('--app-opacity', opacityValue);
     // Apply partial opacity to #app for better visibility while keeping text readable
@@ -197,9 +204,8 @@
     // Filter out segments in unexpected languages
     if (translationSettings.translationType === 'two_way') {
       if (detectedLang !== translationSettings.sourceLanguage && detectedLang !== translationSettings.targetLanguage) return;
-    } else {
-      if (detectedLang !== translationSettings.sourceLanguage) return;
     }
+    // One-way mode: accept any detected language (auto-detection enabled)
     segmentIdCounter++;
     segments.push({
       id: segmentIdCounter,
@@ -293,6 +299,14 @@
       onOriginal: (text: string, is_final: boolean, language?: string) => {
         if (is_final && text.trim()) {
           const detectedLang = language ?? translationSettings.sourceLanguage;
+          // Update detection state for one-way mode
+          if (translationSettings.translationType === 'one_way' && language) {
+            detectionState = {
+              status: 'detected',
+              detectedLanguage: language
+              // Note: Confidence not provided by Soniox API, omitting field
+            };
+          }
           // Determine target lang: in two-way, it's the "other" language
           const target = translationSettings.translationType === 'two_way'
             ? (detectedLang === translationSettings.sourceLanguage ? translationSettings.targetLanguage : translationSettings.sourceLanguage)
@@ -303,10 +317,18 @@
         } else if (!is_final) {
           provisionalText = text;
           provisionalLang = language ?? '';
+          // Update to detecting state during provisional transcription
+          if (translationSettings.translationType === 'one_way' && isTranslating) {
+            detectionState = { status: 'detecting' };
+          }
         } else {
           // Empty final = clear provisional
           provisionalText = '';
           provisionalLang = '';
+          // Reset to idle when endpoint detected
+          if (translationSettings.translationType === 'one_way') {
+            detectionState = { status: 'idle' };
+          }
         }
       },
       onTranslation: (text: string, _is_final: boolean) => {
@@ -345,10 +367,8 @@
   // ---------------------------------------------------------------------------
 
   async function startOfflineMode(): Promise<void> {
-    console.log('[Auralis] Starting offline pipeline, source:', translationSettings.audioSource);
     await invoke('start_local_pipeline', { source: translationSettings.audioSource });
     statusMessage = 'Starting offline pipeline...';
-    console.log('[Auralis] Pipeline invoke returned');
   }
 
   async function stopOfflineMode(): Promise<void> {
@@ -379,7 +399,6 @@
         activeAudioSources = [translationSettings.audioSource];
       }
       statusMessage = 'Starting...';
-      console.log('[Auralis] handleStart, mode:', translationSettings.mode);
 
       await saveSettingsImmediately();
 
@@ -411,6 +430,7 @@
       isTranslating = false;
       activeAudioSources = [];
       statusMessage = 'Stopped';
+      detectionState = { status: 'idle' };
     } catch (error) {
       errorMessage = `Failed to stop: ${error}`;
       statusMessage = 'Stop failed';
@@ -419,7 +439,6 @@
   }
 
   function handleOpenSettings() {
-    console.log('[App] Opening settings');
     initialSettingsTab = 'translation';
     currentView = 'settings';
   }
@@ -431,7 +450,6 @@
   }
 
   function handleOpenSaved() {
-    console.log('[App] Opening saved transcripts');
     currentView = 'saved';
   }
 
@@ -456,7 +474,6 @@
     claude_api_key: string;
     openai_api_key: string;
   }) {
-    console.log('[Auralis] Saving settings:', { opacity: settings.opacity, fontSize: settings.font_size });
     translationSettings.mode = settings.mode;
     subscriptionStore.update('apiKey', settings.soniox_api_key);
     subscriptionStore.update('googleApiKey', settings.google_api_key);
@@ -636,6 +653,14 @@
           if (text) {
             const detectedLang = data.source_lang ?? translationSettings.sourceLanguage;
             const target = data.target_lang ?? translationSettings.targetLanguage;
+            // Update detection state for one-way mode
+            if (translationSettings.translationType === 'one_way' && data.source_lang) {
+              detectionState = {
+                status: 'detected',
+                detectedLanguage: data.source_lang
+                // Note: Confidence not provided by Whisper MLX, omitting field
+              };
+            }
             addSegment(text, detectedLang, target);
           }
         } else if (data.type === 'result') {
@@ -797,6 +822,8 @@
     sourceLanguage={translationSettings.sourceLanguage}
     targetLanguage={translationSettings.targetLanguage}
     mode={translationSettings.mode}
+    translationType={translationSettings.translationType}
+    detectionState={detectionState}
     onToggleRecord={handleToggleRecord}
     onOpenSettings={handleOpenSettings}
     onOpenSaved={handleOpenSaved}

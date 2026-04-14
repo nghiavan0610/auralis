@@ -116,7 +116,7 @@ export class SonioxClient {
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
   // ---- audio backpressure queue -------------------------------------------
-  private audioQueue: Array<ArrayBuffer | Uint8Array> = [];
+  private audioQueue: ArrayBuffer[] = [];
   private isProcessingQueue = false;
   private readonly MAX_QUEUE_SIZE = 10;
   private droppedFrames = 0;
@@ -166,7 +166,11 @@ export class SonioxClient {
       return;
     }
 
-    this.audioQueue.push(pcmData);
+    // Convert Uint8Array to ArrayBuffer for consistent typing
+    const buffer = pcmData instanceof Uint8Array
+      ? pcmData.buffer.slice(pcmData.byteOffset, pcmData.byteOffset + pcmData.byteLength) as ArrayBuffer
+      : pcmData;
+    this.audioQueue.push(buffer);
     this.processAudioQueue();
   }
 
@@ -192,7 +196,6 @@ export class SonioxClient {
         socket.send(chunk);
         // Reset dropped counter when we successfully send
         if (this.droppedFrames > 0 && this.audioQueue.length < this.MAX_QUEUE_SIZE / 2) {
-          console.log(`[Soniox] Audio queue recovered, dropped ${this.droppedFrames} total frames`);
           this.droppedFrames = 0;
         }
       } catch (error) {
@@ -439,16 +442,8 @@ export class SonioxClient {
       num_channels: 1,
       enable_endpoint_detection: true,
       max_endpoint_delay_ms: Math.round((this.config.endpoint_delay ?? 1.5) * 1000),
-      enable_language_identification: this.config.translation_type === "two_way",
+      enable_language_identification: true, // Enable for all modes (auto-detection)
     };
-
-    // Language hints.
-    if (
-      this.config.source_language &&
-      this.config.source_language !== "auto"
-    ) {
-      msg.language_hints = [this.config.source_language];
-    }
 
     // Translation configuration.
     if (this.config.translation_type === "two_way") {
@@ -457,15 +452,18 @@ export class SonioxClient {
         language_a: this.config.source_language,
         language_b: this.config.target_language,
       };
+      // For two-way: constrain detection to the two configured languages
       msg.language_hints = [
         this.config.source_language,
         this.config.target_language,
       ];
     } else {
+      // One-way: auto-detect any language, translate to target
       msg.translation = {
         type: "one_way",
         target_language: this.config.target_language,
       };
+      // No language hints for one-way - allow full auto-detection
     }
 
     // Context carryover from previous session.

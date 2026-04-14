@@ -299,3 +299,587 @@ a:hover {
     transform: scale(1.15);
   }
 }
+/* ==========================================================================
+   Auralis Auto-Detection UI Design System
+   ==========================================================================
+
+   Visual language for language auto-detection feature that clearly
+   communicates detection states while maintaining consistency with
+   the existing glassmorphism design system.
+
+   Design Principles:
+   - Clear visual hierarchy for detection states
+   - Consistent with existing glassmorphism aesthetic
+   - Accessible (WCAG AA compliant)
+   - Compact and unobtrusive
+   - Provides real-time feedback without clutter
+
+   ========================================================================== */
+
+/* ==========================================================================
+   AUTO-DETECTION DESIGN TOKENS
+   ========================================================================== */
+
+:root {
+  /* Auto-Detect State Colors */
+  --auto-detect-idle: rgba(99, 140, 255, 0.6);
+  --auto-detect-detecting: rgba(99, 140, 255, 0.9);
+  --auto-detect-detected: rgba(76, 175, 80, 0.8);
+  --auto-detect-uncertain: rgba(251, 191, 36, 0.8);
+  --auto-detect-error: rgba(255, 77, 77, 0.8);
+
+  /* Confidence Levels */
+  --confidence-high: rgba(76, 175, 80, 1);
+  --confidence-medium: rgba(251, 191, 36, 1);
+  --confidence-low: rgba(255, 77, 77, 1);
+
+  /* Animation Timings */
+  --auto-detect-pulse-duration: 2s;
+  --auto-detect-transition: 0.3s ease;
+  --auto-detect-shimmer-duration: 1.5s;
+}
+
+/* ==========================================================================
+   AUTO-DETECT ICON SYSTEM
+   ========================================================================== */
+
+/* Auto-detect globe icon - animated when detecting */
+.auto-detect-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  transition: all var(--auto-detect-transition);
+}
+
+/* Idle state - subtle glow */
+.auto-detect-icon.idle {
+  opacity: 0.7;
+  filter: grayscale(0.3);
+}
+
+/* Detecting state - animated pulse */
+.auto-detect-icon.detecting {
+  opacity: 1;
+  will-change: transform, opacity;
+  animation: auto-detect-pulse var(--auto-detect-pulse-duration) ease-in-out infinite;
+}
+
+.auto-detect-icon.detecting::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--auto-detect-detecting) 0%, transparent 70%);
+  animation: auto-detect-ripple var(--auto-detect-pulse-duration) ease-in-out infinite;
+  z-index: -1;
+}
+
+/* Detected state - success indicator */
+.auto-detect-icon.detected {
+  opacity: 1;
+  filter: none;
+  transform: scale(1.1);
+}
+
+/* Uncertain state - warning indicator */
+.auto-detect-icon.uncertain {
+  opacity: 0.8;
+  animation: auto-detect-wobble 0.5s ease-in-out;
+}
+
+/* ==========================================================================
+   LANGUAGE INDICATOR COMPONENT
+   ========================================================================== */
+
+/* Enhanced language indicator with auto-detect states */
+.lang-indicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(99, 140, 255, 0.08);
+  border: 1px solid rgba(99, 140, 255, 0.15);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--auto-detect-transition);
+  overflow: hidden;
+}
+
+.lang-indicator::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  transition: left 0.5s ease;
+}
+
+.lang-indicator:hover {
+  background: rgba(99, 140, 255, 0.15);
+  border-color: rgba(99, 140, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.lang-indicator:hover::before {
+  left: 100%;
+}
+
+/* Auto-detect mode specific styling */
+.lang-indicator.auto-detect-mode {
+  background: rgba(99, 140, 255, 0.12);
+  border-color: rgba(99, 140, 255, 0.25);
+}
+
+/* Specific language mode styling */
+.lang-indicator.specific-language {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Language flag container */
+.lang-flag-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.lang-flag {
+  font-size: 12px;
+  transition: all var(--auto-detect-transition);
+}
+
+/* Dynamic flag appearance */
+.lang-flag.auto-detect {
+  opacity: 0.8;
+  animation: flag-shimmer var(--auto-detect-shimmer-duration) ease-in-out infinite;
+}
+
+.lang-flag.detected {
+  animation: flag-pop 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* Confidence meter - subtle visual feedback */
+.confidence-meter {
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--confidence-high), var(--confidence-medium));
+  border-radius: 1px;
+  transition: width var(--auto-detect-transition), opacity var(--auto-detect-transition);
+  opacity: 0;
+}
+
+.lang-indicator.show-confidence .confidence-meter {
+  opacity: 0.8;
+}
+
+/* ==========================================================================
+   DETECTION STATUS BADGE
+   ========================================================================== */
+
+/* Compact status indicator for current detection state */
+.detection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  transition: all var(--auto-detect-transition);
+}
+
+.detection-status.idle {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+
+.detection-status.detecting {
+  background: rgba(99, 140, 255, 0.15);
+  color: var(--accent);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+.detection-status.detected {
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--success);
+}
+
+.detection-status.uncertain {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--warning);
+}
+
+/* ==========================================================================
+   CONTROL BAR AUTO-DETECT INDICATOR
+   ========================================================================== */
+
+/* Language indicator in control bar with enhanced states */
+.control-bar .lang-indicator {
+  min-width: 80px;
+  justify-content: center;
+}
+
+.control-bar .lang-indicator.auto-detect-mode {
+  min-width: 100px;
+}
+
+/* Detection animation overlay */
+.detection-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(99, 140, 255, 0.1),
+    transparent
+  );
+  border-radius: inherit;
+  will-change: transform;
+  animation: detection-shimmer 2s ease-in-out infinite;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lang-indicator.detecting .detection-overlay {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   SETTINGS UI - LANGUAGE SELECTOR
+   ========================================================================== */
+
+/* Auto-detect option in language dropdown */
+.language-option-auto-detect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: linear-gradient(
+    135deg,
+    rgba(99, 140, 255, 0.1) 0%,
+    rgba(99, 140, 255, 0.05) 100%
+  );
+  border: 1px solid rgba(99, 140, 255, 0.2);
+  cursor: pointer;
+  transition: all var(--auto-detect-transition);
+}
+
+.language-option-auto-detect:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(99, 140, 255, 0.15) 0%,
+    rgba(99, 140, 255, 0.08) 100%
+  );
+  border-color: rgba(99, 140, 255, 0.3);
+  transform: translateX(2px);
+}
+
+.language-option-auto-detect.selected {
+  background: linear-gradient(
+    135deg,
+    rgba(99, 140, 255, 0.2) 0%,
+    rgba(99, 140, 255, 0.1) 100%
+  );
+  border-color: var(--accent);
+}
+
+/* Auto-detect badge */
+.auto-detect-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(99, 140, 255, 0.2);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 10px;
+  border: 1px solid rgba(99, 140, 255, 0.3);
+}
+
+/* ==========================================================================
+   MODE-SPECIFIC LANGUAGE SELECTORS
+   ========================================================================== */
+
+/* One-way mode - simplified language selector */
+.one-way-language-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.one-way-language-selector .auto-detect-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(99, 140, 255, 0.1);
+  border: 1px solid rgba(99, 140, 255, 0.2);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+/* Two-way mode - dual language display */
+.two-way-language-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.two-way-language-selector .lang-pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ==========================================================================
+   ANIMATIONS
+   ========================================================================== */
+
+/* Pulse animation for detecting state */
+@keyframes auto-detect-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+/* Ripple effect for detecting icon */
+@keyframes auto-detect-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* Shimmer effect for flag */
+@keyframes flag-shimmer {
+  0%, 100% {
+    filter: brightness(1) grayscale(0.3);
+  }
+  50% {
+    filter: brightness(1.2) grayscale(0);
+  }
+}
+
+/* Pop animation when language is detected */
+@keyframes flag-pop {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Wobble animation for uncertain state */
+@keyframes auto-detect-wobble {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-3deg);
+  }
+  75% {
+    transform: rotate(3deg);
+  }
+}
+
+/* Status pulse animation */
+@keyframes status-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Detection shimmer overlay */
+@keyframes detection-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ==========================================================================
+   TOOLTIPS & HELP TEXT
+   ========================================================================== */
+
+/* Enhanced tooltip for auto-detect */
+.auto-detect-tooltip {
+  max-width: 280px;
+  padding: 12px;
+  background: var(--bg-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+
+.auto-detect-tooltip .tooltip-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auto-detect-tooltip .tooltip-content {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.auto-detect-tooltip .tooltip-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(99, 140, 255, 0.1);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   RESPONSIVE BEHAVIOR
+   ========================================================================== */
+
+/* Compact mode for smaller screens */
+@media (max-width: 768px) {
+  .lang-indicator {
+    padding: 3px 6px;
+    gap: 4px;
+  }
+
+  .lang-flag {
+    font-size: 10px;
+  }
+
+  .detection-status {
+    display: none; /* Hide text status on mobile */
+  }
+
+  .auto-detect-badge {
+    font-size: 8px;
+    padding: 2px 6px;
+  }
+}
+
+/* ==========================================================================
+   ACCESSIBILITY
+   ========================================================================== */
+
+/* Focus states for keyboard navigation */
+.lang-indicator:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.language-option-auto-detect:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .lang-indicator {
+    border-width: 2px;
+  }
+
+  .detection-status {
+    border: 1px solid currentColor;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .auto-detect-icon.detecting,
+  .lang-flag.auto-detect,
+  .detection-status.detecting,
+  .detection-overlay {
+    animation: none;
+  }
+
+  .lang-indicator,
+  .language-option-auto-detect {
+    transition: none;
+  }
+}
+
+/* Screen reader only content */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ==========================================================================
+   UTILITY CLASSES
+   ========================================================================== */
+
+/* State modifiers */
+.auto-detect-idle { --detect-state: var(--auto-detect-idle); }
+.auto-detect-detecting { --detect-state: var(--auto-detect-detecting); }
+.auto-detect-detected { --detect-state: var(--auto-detect-detected); }
+.auto-detect-uncertain { --detect-state: var(--auto-detect-uncertain); }
+
+/* Confidence levels */
+.confidence-high { --confidence-level: var(--confidence-high); }
+.confidence-medium { --confidence-level: var(--confidence-medium); }
+.confidence-low { --confidence-level: var(--confidence-low); }
+
+/* Animation modifiers */
+.no-animation { animation: none !important; }
+.slow-animation { animation-duration: 3s !important; }
+.fast-animation { animation-duration: 0.5s !important; }

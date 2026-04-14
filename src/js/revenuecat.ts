@@ -72,9 +72,6 @@ function getAppUserID(): string {
 		// Generate a new random ID
 		userID = 'anon_' + crypto.randomUUID();
 		localStorage.setItem(APP_USER_ID_KEY, userID);
-		console.log('[RevenueCat] Generated new app user ID:', userID);
-	} else {
-		console.log('[RevenueCat] Using existing app user ID:', userID);
 	}
 
 	return userID;
@@ -95,18 +92,14 @@ export async function initRevenueCat(): Promise<boolean> {
 
 	try {
 		const appUserID = getAppUserID();
-		console.log('[RevenueCat] Initializing with key:', PUBLIC_SDK_KEY.substring(0, 10) + '...');
-		console.log('[RevenueCat] App user ID:', appUserID);
 
 		// Pass app user ID explicitly to avoid "undefined" error
 		purchasesInstance = new Purchases(PUBLIC_SDK_KEY, appUserID);
-		console.log('[RevenueCat] Purchases instance created');
 
 		// RevenueCat v1.32+ doesn't require configure() for web platform
 		// The Purchases constructor automatically handles initialization
 
 		isInitialized = true;
-		console.log('[RevenueCat] Initialized successfully for web/desktop platform');
 		return true;
 	} catch (error) {
 		console.error('[RevenueCat] Initialization failed:', error);
@@ -213,7 +206,6 @@ export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
 				const isPro = ENTITLEMENTS.PRO in activeEntitlements;
 				revenueCatTier = isPro ? 'pro' : 'free';
 
-				console.log('[RevenueCat] Fetched latest tier from server:', revenueCatTier);
 			} catch (error) {
 				console.warn('[RevenueCat] Could not fetch from server, using cached:', error);
 				// Continue with backend-only status
@@ -233,7 +225,6 @@ export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
 		// If RevenueCat says Pro but backend says Free, sync them
 		// This handles cross-device purchases (e.g., bought on iPhone, using on Mac)
 		if (revenueCatTier === 'pro' && backendStatus.tier === 'free') {
-			console.log('[RevenueCat] Syncing Pro tier from RevenueCat to backend');
 			try {
 				await syncSubscriptionWithBackend('pro');
 			} catch (error) {
@@ -243,7 +234,6 @@ export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
 		}
 		// If RevenueCat says Free but backend says Pro, sync down
 		else if (revenueCatTier === 'free' && backendStatus.tier === 'pro') {
-			console.log('[RevenueCat] Syncing Free tier from RevenueCat to backend');
 			try {
 				await syncSubscriptionWithBackend('free');
 			} catch (error) {
@@ -318,9 +308,6 @@ export async function purchasePro(): Promise<SubscriptionStatus> {
 		const offerings = await purchasesInstance.getOfferings();
 
 		// Debug: Log all offerings to see what we got
-		console.log('[RevenueCat] All offerings:', JSON.stringify(offerings, null, 2));
-		console.log('[RevenueCat] Current offering:', offerings.current ? offerings.current.identifier : 'none');
-		console.log('[RevenueCat] Available offerings:', Object.keys(offerings.all || {}));
 
 		const defaultOffering = offerings.current;
 
@@ -332,11 +319,6 @@ export async function purchasePro(): Promise<SubscriptionStatus> {
 		// Debug: Log products in the offering
 		// Web SDK uses availablePackages, each package has webBillingProduct
 		const availablePackages = defaultOffering.availablePackages || [];
-		console.log('[RevenueCat] Packages in offering:', availablePackages.map(pkg => ({
-			id: pkg.identifier,
-			productId: pkg.webBillingProduct?.identifier,
-			price: pkg.webBillingProduct?.price?.formattedPrice,
-		})));
 
 		// Get the monthly package (RevenueCat web SDK uses packages, not products directly)
 		const monthlyPackage = availablePackages.find(
@@ -347,12 +329,10 @@ export async function purchasePro(): Promise<SubscriptionStatus> {
 			throw createError('not_available', 'Pro subscription is not available. Please contact support.');
 		}
 
-		console.log('[RevenueCat] Starting purchase for package:', monthlyPackage.identifier);
 
 		// Launch purchase flow using the package (this opens browser on desktop)
 		const { customerInfo: initialCustomerInfo } = await purchasesInstance.purchasePackage(monthlyPackage);
 
-		console.log('[RevenueCat] Purchase flow completed. Fetching fresh customer info...');
 
 		// After purchase, fetch fresh customer info from RevenueCat servers
 		// There might be a delay between payment completion and entitlement activation
@@ -364,7 +344,6 @@ export async function purchasePro(): Promise<SubscriptionStatus> {
 			// Wait a bit before retry (exponential backoff)
 			if (attempt > 0) {
 				const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-				console.log(`[RevenueCat] Waiting ${delay}ms before retry...`);
 				await new Promise(resolve => setTimeout(resolve, delay));
 			}
 
@@ -372,7 +351,6 @@ export async function purchasePro(): Promise<SubscriptionStatus> {
 			customerInfo = await purchasesInstance.getCustomerInfo();
 			hasPro = ENTITLEMENTS.PRO in (customerInfo.entitlements?.active || {});
 
-			console.log(`[RevenueCat] Attempt ${attempt + 1}: hasPro = ${hasPro}`);
 
 			if (hasPro) {
 				break;
@@ -381,7 +359,6 @@ export async function purchasePro(): Promise<SubscriptionStatus> {
 
 		// Check if purchase was successful
 		if (hasPro) {
-			console.log('[RevenueCat] Purchase successful! Pro entitlement is now active.');
 
 			// Sync with backend
 			await syncSubscriptionWithBackend('pro');
@@ -437,7 +414,6 @@ async function syncSubscriptionWithBackend(tier: SubscriptionTier): Promise<void
 			},
 		});
 
-		console.log(`[RevenueCat] Synced tier with backend: ${tier}`);
 	} catch (error) {
 		console.error('[RevenueCat] Failed to sync with backend:', error);
 		throw createError('unknown', 'Subscription was purchased but could not be synced. Please restart the app.');
@@ -459,17 +435,14 @@ export async function restorePurchases(): Promise<SubscriptionStatus> {
 	}
 
 	try {
-		console.log('[RevenueCat] Restoring purchases...');
 
 		// This will sync with RevenueCat servers
 		const customerInfo = await purchasesInstance.getCustomerInfo();
 
 		// Check if user has active Pro entitlement
 		if (customerInfo.entitlements?.active?.[ENTITLEMENTS.PRO]) {
-			console.log('[RevenueCat] Found active Pro subscription');
 			await syncSubscriptionWithBackend('pro');
 		} else {
-			console.log('[RevenueCat] No active Pro subscription found');
 			// Sync free tier just in case
 			await syncSubscriptionWithBackend('free');
 		}
@@ -509,8 +482,6 @@ export async function getProProductInfo(): Promise<{
 		const offerings = await purchasesInstance.getOfferings();
 
 		// Debug: Log all offerings to see what we got
-		console.log('[RevenueCat] getProProductInfo - All offerings:', JSON.stringify(offerings, null, 2));
-		console.log('[RevenueCat] getProProductInfo - Current offering:', offerings.current ? offerings.current.identifier : 'none');
 
 		const defaultOffering = offerings.current;
 
@@ -522,10 +493,6 @@ export async function getProProductInfo(): Promise<{
 		// Debug: Log products in the offering
 		// Web SDK uses availablePackages, each package has webBillingProduct
 		const availablePackages = defaultOffering.availablePackages || [];
-		console.log('[RevenueCat] getProProductInfo - Packages in offering:', availablePackages.map(pkg => ({
-			id: pkg.identifier,
-			productId: pkg.webBillingProduct?.identifier,
-		})));
 
 		// Find the package containing our product
 		const pkg = availablePackages.find(
@@ -601,7 +568,6 @@ export async function startPeriodicSync(): Promise<void> {
 	// Do an immediate sync first
 	try {
 		await getSubscriptionStatus();
-		console.log('[RevenueCat] Initial sync completed');
 	} catch (error) {
 		console.warn('[RevenueCat] Initial sync failed:', error);
 	}
@@ -610,13 +576,11 @@ export async function startPeriodicSync(): Promise<void> {
 	syncInterval = setInterval(async () => {
 		try {
 			await getSubscriptionStatus();
-			console.log('[RevenueCat] Periodic sync completed');
 		} catch (error) {
 			console.warn('[RevenueCat] Periodic sync failed:', error);
 		}
 	}, SYNC_INTERVAL_MS);
 
-	console.log(`[RevenueCat] Started periodic sync (every ${SYNC_INTERVAL_MS / 1000 / 60} minutes)`);
 }
 
 /**
@@ -628,7 +592,6 @@ export function stopPeriodicSync(): void {
 	if (syncInterval) {
 		clearInterval(syncInterval);
 		syncInterval = null;
-		console.log('[RevenueCat] Stopped periodic sync');
 	}
 }
 
@@ -637,6 +600,5 @@ export function stopPeriodicSync(): void {
  * Use this when you need to refresh subscription status right away.
  */
 export async function forceSync(): Promise<SubscriptionStatus> {
-	console.log('[RevenueCat] Forcing immediate sync...');
 	return await getSubscriptionStatus();
 }

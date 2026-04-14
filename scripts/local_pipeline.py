@@ -368,7 +368,7 @@ class LocalPipeline:
         audio_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / INT16_MAX
 
         # Use initial_prompt to improve accuracy (helps Whisper with context)
-        prompt = f"The following is a speech in {self.source_lang}."
+        prompt = "The following is a speech transcription."
         if self.prev_transcript:
             tail = " ".join(self.prev_transcript.split()[-8:])
             prompt = tail
@@ -376,7 +376,7 @@ class LocalPipeline:
         result = mlx_whisper.transcribe(
             audio_np,
             path_or_hf_repo=self.whisper_repo,
-            language=self.source_lang if not self.two_way else None,
+            language=None,  # Enable auto-detection for all modes
             initial_prompt=prompt,
         )
         text = result.get("text", "").strip()

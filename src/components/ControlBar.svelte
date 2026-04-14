@@ -1,9 +1,10 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import type { AudioSource } from '../types';
+  import type { AudioSource, TranslationType, DetectionState } from '../types';
   import { getLangLabel, getLangFlag } from '../js/lang';
   import { onDestroy } from 'svelte';
   import Tooltip from './Tooltip.svelte';
+  import AutoDetectIndicator from './AutoDetectIndicator.svelte';
 
   interface PlatformInfo {
     os: string;
@@ -23,6 +24,8 @@
     sourceLanguage = 'en',
     targetLanguage = 'vi',
     mode = 'cloud',
+    translationType = 'one_way',
+    detectionState = { status: 'idle' } as DetectionState,
     activeAudioSources = [],
     onToggleRecord,
     onOpenSettings,
@@ -47,6 +50,8 @@
     sourceLanguage?: string;
     targetLanguage?: string;
     mode?: 'cloud' | 'offline';
+    translationType?: TranslationType;
+    detectionState?: DetectionState;
     activeAudioSources?: AudioSource[];
     onToggleRecord: () => void;
     onOpenSettings: () => void;
@@ -143,11 +148,6 @@
     if (statusType === 'ready') return 'var(--success)';
     return 'var(--text-dim)';
   }
-
-  function handleSettingsClick() {
-    console.log('[ControlBar] Settings clicked');
-    onOpenSettings();
-  }
 </script>
 
 <div class="control-bar">
@@ -163,7 +163,7 @@
         </button>
       </Tooltip>
     {/if}
-    <button class="bar-btn gear-btn" onclick={() => { console.log('[ControlBar] Settings clicked'); onOpenSettings(); }} title="Settings (⌘,)">
+    <button class="bar-btn gear-btn" onclick={onOpenSettings} title="Settings (⌘,)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -174,15 +174,25 @@
     </button>
     <span class="status-dot" style="background: {statusColor()}"></span>
     <span class="status-text" data-tauri-drag-region>{statusText}</span>
-    <Tooltip content={`${getLangLabel(sourceLanguage)} → ${getLangLabel(targetLanguage)} (Click to change)`}>
-      <div class="lang-indicator" onclick={() => onShowLanguageSelector ? onShowLanguageSelector() : onOpenSettings()}>
-      <span class="lang-flag">{getLangFlag(sourceLanguage)}</span>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
-        <path d="M5 12h14M12 5l7 7-7 7"/>
-      </svg>
-      <span class="lang-flag">{getLangFlag(targetLanguage)}</span>
-      </div>
-    </Tooltip>
+    {#if translationType === 'one_way'}
+      <AutoDetectIndicator
+        detectionState={detectionState}
+        targetLanguage={targetLanguage}
+        showLabel={false}
+        compact={true}
+        onClick={() => onShowLanguageSelector ? onShowLanguageSelector() : onOpenSettings()}
+      />
+    {:else}
+      <Tooltip content={`${getLangLabel(sourceLanguage)} ↔ ${getLangLabel(targetLanguage)} (Click to change)`}>
+        <div class="lang-indicator" onclick={() => onShowLanguageSelector ? onShowLanguageSelector() : onOpenSettings()}>
+          <span class="lang-flag">{getLangFlag(sourceLanguage)}</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+          <span class="lang-flag">{getLangFlag(targetLanguage)}</span>
+        </div>
+      </Tooltip>
+    {/if}
     <Tooltip content={mode === 'cloud' ? 'Cloud mode (Click to change)' : 'Offline mode (Click to change)'}>
       <div class="mode-indicator" class:cloud={mode === 'cloud'} class:offline={mode === 'offline'} onclick={() => onShowModeSelector ? onShowModeSelector() : onOpenSettings()}>
       {#if mode === 'cloud'}
@@ -290,7 +300,7 @@
       </Tooltip>
 
       <Tooltip content="View saved transcripts" position="top">
-        <button class="bar-btn" onclick={() => { console.log('[ControlBar] Saved transcripts clicked'); onOpenSaved(); }}>
+        <button class="bar-btn" onclick={onOpenSaved}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
           <polyline points="12 6 12 12 16 14"/>
