@@ -3,6 +3,7 @@
 
 mod audio;
 mod state;
+mod constants;
 #[macro_use]
 mod commands;
 mod commands_audio;
@@ -97,6 +98,7 @@ fn main() {
             delete_summary,
             check_summary,
             get_subscription_status,
+            handle_revenuecat_webhook,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

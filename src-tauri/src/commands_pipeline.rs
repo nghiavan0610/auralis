@@ -14,6 +14,7 @@ use auralis::domain::traits::AudioSource;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 // ---------------------------------------------------------------------------
@@ -264,7 +265,7 @@ pub async fn start_local_pipeline(
     let source = source.unwrap_or_else(|| "microphone".to_string());
 
     // --- Guard: already streaming? ---
-    if state.is_streaming.load(Ordering::Relaxed) {
+    if state.is_streaming.load(std::sync::atomic::Ordering::Acquire) {
         return Err("Pipeline is already running".to_string());
     }
 
@@ -442,7 +443,7 @@ pub async fn start_local_pipeline(
     }
 
     // --- Start audio capture based on source ---
-    state.is_streaming.store(true, Ordering::Relaxed);
+    state.is_streaming.store(true, std::sync::atomic::Ordering::SeqCst);
     if !preloaded {
         state.pipeline_ready.store(false, Ordering::Relaxed);
     }
@@ -562,7 +563,7 @@ pub async fn start_local_pipeline(
         Ok(sources) => sources,
         Err(e) => {
             log(&format!("Audio capture failed, killing pipeline: {}", e));
-            state.is_streaming.store(false, Ordering::Relaxed);
+            state.is_streaming.store(false, std::sync::atomic::Ordering::SeqCst);
             // Kill the pipeline process if one exists
             let mut guard = state.pipeline.lock().map_err(|e2| e2.to_string())?;
             if let Some(mut ps) = guard.take() {
@@ -591,7 +592,7 @@ pub async fn start_local_pipeline(
         let mut flushed_stale = false;
 
         while !stream_stop.load(Ordering::Relaxed) {
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
             if !pipeline_ready.load(Ordering::Relaxed) {
                 continue;
@@ -627,7 +628,12 @@ pub async fn start_local_pipeline(
                 if *rec {
                     let mut d = data.lock().unwrap_or_else(|e| e.into_inner());
                     let chunks: Vec<Vec<f32>> = d.drain(..).collect();
-                    let samples: Vec<f32> = chunks.into_iter().flatten().collect();
+                    // Pre-allocate with capacity to reduce reallocations
+                    let total_samples: usize = chunks.iter().map(|c| c.len()).sum();
+                    let mut samples = Vec::with_capacity(total_samples);
+                    for chunk in chunks {
+                        samples.extend_from_slice(&chunk);
+                    }
                     let pcm = f32_to_pcm_s16le(&samples);
                     mic_bytes_total += pcm.len() as u64;
                     pcm
@@ -664,7 +670,7 @@ pub async fn start_local_pipeline(
                 continue;
             }
 
-            // Log audio flow every 5 seconds (25 iterations at 200ms)
+            // Log audio flow every 5 seconds (100 iterations at 50ms)
             loop_count += 1;
             if loop_count % 25 == 0 {
                 tracing::info!(
@@ -712,27 +718,59 @@ pub async fn stop_local_pipeline(
 ) -> Result<(), String> {
     log("stop_local_pipeline called");
 
-    state.stream_stop.store(true, Ordering::Relaxed);
+    state.stream_stop.store(true, std::sync::atomic::Ordering::SeqCst);
 
     // Take ownership of PipelineState out of the mutex before cleanup,
-    // so audio writer tasks aren't blocked on the mutex during the sleep.
+    // so audio writer tasks aren't blocked on the mutex during the wait.
     let pipeline_state = {
         let mut guard = state.pipeline.lock().map_err(|e| e.to_string())?;
         guard.take()
     };
 
     if let Some(mut ps) = pipeline_state {
-        drop(ps.stdin); // Close pipe → Python sees EOF and exits
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let _ = ps.child.kill();
-        let _ = ps.child.wait();
-        log("Pipeline process killed");
+        // Close stdin → Python sees EOF and should exit gracefully
+        drop(ps.stdin);
+
+        // Try to wait for graceful exit with exponential backoff
+        // Total max wait time: 50ms + 100ms + 200ms + 400ms + 800ms = 1.55s
+        let mut exited = false;
+        let mut delay = Duration::from_millis(50);
+
+        for attempt in 0..5 {
+            // Check if process has exited
+            match ps.child.try_wait() {
+                Ok(Some(_)) => {
+                    log(&format!("Pipeline process exited gracefully after {} attempts", attempt + 1));
+                    exited = true;
+                    break;
+                }
+                Ok(None) => {
+                    // Process still running, wait before next check
+                    if attempt < 4 {
+                        tokio::time::sleep(delay).await;
+                        delay *= 2; // Exponential backoff
+                    }
+                }
+                Err(e) => {
+                    log(&format!("Error checking process status: {}", e));
+                    break;
+                }
+            }
+        }
+
+        // Force kill if still running after graceful shutdown period
+        if !exited {
+            log("Pipeline process did not exit gracefully, force killing");
+            let _ = ps.child.kill();
+            let _ = ps.child.wait();
+            log("Pipeline process force killed");
+        }
     } else {
         log("No pipeline running to stop");
     }
 
     state.is_streaming.store(false, Ordering::Relaxed);
-    state.stream_stop.store(false, Ordering::Relaxed);
+    state.stream_stop.store(false, std::sync::atomic::Ordering::SeqCst);
     state.pipeline_ready.store(false, Ordering::Relaxed);
 
     log("Pipeline stopped");

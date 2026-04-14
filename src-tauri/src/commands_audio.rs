@@ -28,7 +28,7 @@ pub async fn start_audio_capture(
     let source = source.unwrap_or_else(|| "microphone".to_string());
 
     // Check if already streaming
-    if state.is_streaming.load(Ordering::Relaxed) {
+    if state.is_streaming.load(std::sync::atomic::Ordering::Acquire) {
         return Err("Audio capture is already running".to_string());
     }
 
@@ -61,7 +61,7 @@ async fn start_mic_capture(
     let is_recording = capture.is_recording_flag();
     let stream_stop = state.stream_stop.clone();
 
-    state.is_streaming.store(true, Ordering::Relaxed);
+    state.is_streaming.store(true, std::sync::atomic::Ordering::SeqCst);
 
     let _ = app_handle.emit(
         "audio-capture",
@@ -97,7 +97,7 @@ async fn start_mic_capture(
             }
         }
 
-        is_streaming.store(false, Ordering::Relaxed);
+        is_streaming.store(false, std::sync::atomic::Ordering::SeqCst);
         let _ = app.emit(
             "audio-capture",
             serde_json::json!({ "is_capturing": false }),
@@ -118,7 +118,7 @@ async fn start_system_capture(
         format!("System audio capture failed: {}. Opening Screen Recording settings...", e)
     })?;
 
-    state.is_streaming.store(true, Ordering::Relaxed);
+    state.is_streaming.store(true, std::sync::atomic::Ordering::SeqCst);
 
     let _ = app_handle.emit(
         "audio-capture",
@@ -146,7 +146,7 @@ async fn start_system_capture(
             }
         }
 
-        is_streaming.store(false, Ordering::Relaxed);
+        is_streaming.store(false, std::sync::atomic::Ordering::SeqCst);
         let _ = app.emit(
             "audio-capture",
             serde_json::json!({ "is_capturing": false }),
@@ -185,7 +185,7 @@ async fn start_both_capture(
         rx
     });
 
-    state.is_streaming.store(true, Ordering::Relaxed);
+    state.is_streaming.store(true, std::sync::atomic::Ordering::SeqCst);
 
     let _ = app_handle.emit(
         "audio-capture",
@@ -241,7 +241,7 @@ async fn start_both_capture(
             }
         }
 
-        is_streaming.store(false, Ordering::Relaxed);
+        is_streaming.store(false, std::sync::atomic::Ordering::SeqCst);
         let _ = app.emit(
             "audio-capture",
             serde_json::json!({ "is_capturing": false }),
@@ -256,14 +256,14 @@ async fn start_both_capture(
 pub async fn stop_audio_capture(
     state: State<'_, AuralisState>,
 ) -> Result<String, String> {
-    if !state.is_streaming.load(Ordering::Relaxed) {
+    if !state.is_streaming.load(std::sync::atomic::Ordering::Acquire) {
         return Err("Audio capture is not running".to_string());
     }
 
-    state.stream_stop.store(true, Ordering::Relaxed);
+    state.stream_stop.store(true, std::sync::atomic::Ordering::SeqCst);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     state.is_streaming.store(false, Ordering::Relaxed);
-    state.stream_stop.store(false, Ordering::Relaxed);
+    state.stream_stop.store(false, std::sync::atomic::Ordering::SeqCst);
 
     Ok("Audio capture stopped".to_string())
 }

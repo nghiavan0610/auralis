@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import Button from './Button.svelte';
 
   let {
     progress = $bindable(0),
@@ -78,9 +79,9 @@
   {:else}
     <div class="setup-prompt">
       <p>Offline mode requires downloading MLX Whisper and Gemma-3 LLM (~3 GB).</p>
-      <button class="btn-primary" onclick={handleSetup}>
+      <Button variant="primary" onclick={handleSetup} loading={setting}>
         Setup Offline Mode
-      </button>
+      </Button>
       {#if errorMsg}
         <div class="error">{errorMsg}</div>
       {/if}

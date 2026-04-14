@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod state;
+pub mod constants;
 pub mod commands;
 pub mod commands_audio;
 pub mod commands_settings;
@@ -10,4 +11,5 @@ pub mod google_tts;
 pub mod elevenlabs_tts;
 
 pub use state::{AuralisState, Settings};
+pub use constants::*;
 pub use commands::*;

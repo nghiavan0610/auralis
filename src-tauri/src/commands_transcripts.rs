@@ -333,43 +333,63 @@ pub async fn generate_summary(
     }
 
     // Check subscription tier and enforce limits
+    // IMPORTANT: Must atomically check limit AND increment to prevent race conditions
     let current_month = chrono::Utc::now().format("%Y-%m").to_string();
-    let (subscription_tier, summaries_count, _last_reset, _provider, claude_key, _openai_key) = {
-        let settings = state.settings.lock().await;
+    let (subscription_tier, model_to_use, gpt_key_to_use) = {
+        let mut settings = state.settings.lock().await;
+
+        // Check if we need to reset the monthly counter
         let needs_reset = settings.last_summary_reset != current_month;
         if needs_reset {
-            // Drop the lock before we potentially acquire it again
-            drop(settings);
-            // Reset counter for new month
-            let mut s = state.settings.lock().await;
-            s.summaries_this_month = 0;
-            s.last_summary_reset = current_month.clone();
+            settings.summaries_this_month = 0;
+            settings.last_summary_reset = current_month.clone();
         }
 
-        // Re-acquire to read all fields
-        let settings = state.settings.lock().await;
-        (
-            settings.subscription_tier.clone(),
-            settings.summaries_this_month,
-            settings.last_summary_reset.clone(),
-            settings.summary_provider.clone(),
-            settings.claude_api_key.clone(),
-            settings.openai_api_key.clone(),
-        )
+        let tier = settings.subscription_tier.clone();
+        let current_count = settings.summaries_this_month;
+        let limit = if tier == "free" {
+            crate::constants::FREE_TIER_SUMMARY_LIMIT
+        } else {
+            crate::constants::PRO_TIER_SUMMARY_LIMIT
+        };
+
+        // Enforce limit BEFORE incrementing (optimistic increment)
+        if current_count >= limit {
+            drop(settings);
+            if tier == "free" {
+                return Err(format!(
+                    "Free tier limit reached: {} summaries per month. Upgrade to Pro for up to {} summaries/month.",
+                    crate::constants::FREE_TIER_SUMMARY_LIMIT,
+                    crate::constants::PRO_TIER_SUMMARY_LIMIT
+                ));
+            } else {
+                return Err(format!(
+                    "Pro tier limit reached: {} summaries per month. Please contact support@auralis.app if you need more.",
+                    crate::constants::PRO_TIER_SUMMARY_LIMIT
+                ));
+            }
+        }
+
+        // Atomically increment counter (optimistic increment)
+        settings.summaries_this_month += 1;
+
+        // Determine model and get API key based on tier
+        let (model, gpt_key) = if tier == "pro" {
+            ("gpt".to_string(), std::env::var("AURALIS_OPENAI_API_KEY").unwrap_or_default())
+        } else {
+            ("gemma".to_string(), String::new())
+        };
+
+        // Verify Pro tier has backend key configured
+        if tier == "pro" && gpt_key.is_empty() {
+            // Rollback the counter increment since we can't proceed
+            settings.summaries_this_month -= 1;
+            drop(settings);
+            return Err("Pro tier is not configured. Please contact support.".to_string());
+        }
+
+        (tier, model, gpt_key)
     };
-
-    // Enforce Free tier limit (5/month) and Pro tier limit (500/month)
-    if subscription_tier == "free" && summaries_count >= 5 {
-        return Err(
-            "Free tier limit reached: 5 summaries per month. Upgrade to Pro for up to 500 summaries/month.".to_string()
-        );
-    }
-
-    if subscription_tier == "pro" && summaries_count >= 500 {
-        return Err(
-            "Pro tier limit reached: 500 summaries per month. Please contact support@auralis.app if you need more.".to_string()
-        );
-    }
 
     let python = crate::commands_pipeline::find_python();
 
@@ -410,27 +430,13 @@ pub async fn generate_summary(
         }
     };
 
-    // Determine model and API key based on subscription tier
-    // Free tier: Gemma only (offline)
-    // Pro tier: GPT-4o-mini with backend key
-    let (model_to_use, gpt_key_to_use) = if subscription_tier == "pro" {
-        ("gpt".to_string(), std::env::var("AURALIS_OPENAI_API_KEY").unwrap_or_default())
-    } else {
-        // Free tier: force gemma
-        ("gemma".to_string(), String::new())
-    };
-
-    if subscription_tier == "pro" && gpt_key_to_use.is_empty() {
-        return Err("Pro tier is not configured. Please contact support.".to_string());
-    }
-
     // Build command args
     let args: Vec<String> = vec![
         script_path.to_string_lossy().to_string(),
         "--input".to_string(),
         transcript_path.to_string_lossy().to_string(),
         "--tier".to_string(),
-        tier.clone(),
+        subscription_tier.clone(),
         "--model".to_string(),
         model_to_use.clone(),
     ];
@@ -446,7 +452,6 @@ pub async fn generate_summary(
     let mut child = Command::new(&python)
         .args(&args)
         .env("PATH", path_env)
-        .env("ANTHROPIC_API_KEY", &claude_key)
         .env("OPENAI_API_KEY", &gpt_key_to_use)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -531,12 +536,7 @@ pub async fn generate_summary(
                                                             "Summary saved to {:?}",
                                                             path
                                                         );
-                                                        // Increment summary counter for Free tier
-                                                        let rt = tokio::runtime::Runtime::new().unwrap();
-                                                        rt.block_on(async {
-                                                            let mut settings = settings_arc.lock().await;
-                                                            settings.summaries_this_month += 1;
-                                                        });
+                                                        // Counter already incremented atomically at the start
                                                     }
                                                 }
                                                 Err(e) => {
@@ -714,6 +714,108 @@ pub async fn get_subscription_status(state: State<'_, AuralisState>) -> Result<s
         "tier": tier,
         "remaining_summaries": remaining,
         "reset_date": reset_date,
+    }))
+}
+
+/// Handle RevenueCat webhook events to update subscription tier.
+/// This endpoint is called by RevenueCat when subscription status changes.
+///
+/// Expected JSON payload:
+/// {
+///   "event": {
+///     "event_type": "INITIAL_PURCHASE" | "RENEWAL" | "CANCELLATION" | "EXPIRATION",
+///     "product_id": "auralis_pro_monthly",
+///     "entitlement_id": "pro"
+///   },
+///   "api_version": "1.0"
+/// }
+#[tauri::command]
+pub async fn handle_revenuecat_webhook(
+    state: State<'_, AuralisState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+
+    // Validate webhook payload structure
+    let event = payload
+        .get("event")
+        .and_then(|e| e.as_object())
+        .ok_or("Invalid webhook payload: missing event")?;
+
+    let event_type = event
+        .get("event_type")
+        .and_then(|t| t.as_str())
+        .ok_or("Invalid webhook payload: missing event_type")?;
+
+    let entitlement_id = event
+        .get("entitlement_id")
+        .and_then(|e| e.as_str())
+        .unwrap_or("");
+
+    tracing::info!(
+        "RevenueCat webhook: event_type={}, entitlement_id={}",
+        event_type,
+        entitlement_id
+    );
+
+    // Determine new tier based on event type
+    let new_tier = match event_type {
+        "INITIAL_PURCHASE" | "RENEWAL" | "UNCANCELLATION" => {
+            if entitlement_id == "pro" {
+                "pro".to_string()
+            } else {
+                "free".to_string()
+            }
+        }
+        "CANCELLATION" | "EXPIRATION" | "PRODUCT_CHANGE" => {
+            // Downgrade to free when subscription is cancelled or expires
+            "free".to_string()
+        }
+        _ => {
+            // For other events (like TEST), don't change tier
+            return Ok(json!({
+                "status": "ignored",
+                "message": format!("Event type '{}' ignored", event_type)
+            }));
+        }
+    };
+
+    // Update subscription tier in settings
+    let mut settings = state.settings.lock().await;
+    let old_tier = settings.subscription_tier.clone();
+    settings.subscription_tier = new_tier.clone();
+    let settings_to_save = settings.clone();
+    drop(settings); // Release lock before I/O
+
+    tracing::info!(
+        "Subscription tier updated: {} -> {}",
+        old_tier,
+        new_tier
+    );
+
+    // Persist settings to disk
+    let config_dir = dirs::config_dir()
+        .ok_or_else(|| "Could not determine config directory".to_string())?;
+    let auralis_dir = config_dir.join("auralis");
+    let settings_file = auralis_dir.join("settings.json");
+
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&auralis_dir)
+        .map_err(|e| format!("Failed to create config directory: {}", e))?;
+
+    // Write settings
+    let json = serde_json::to_string_pretty(&settings_to_save)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    std::fs::write(&settings_file, json)
+        .map_err(|e| format!("Failed to write settings file: {}", e))?;
+
+    tracing::info!("Settings saved after webhook tier update");
+
+    Ok(json!({
+        "status": "success",
+        "old_tier": old_tier,
+        "new_tier": new_tier,
+        "event_type": event_type
     }))
 }
 

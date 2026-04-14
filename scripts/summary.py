@@ -247,14 +247,15 @@ def generate_gemma(prompt: str) -> str:
     """Generate summary using local Gemma-3-4B-IT via mlx_lm.
 
     Loads the quantized model, runs generation, returns raw text.
+    Uses the same QAT model as translation to avoid duplicate downloads.
     """
     from mlx_lm import load, generate
 
     emit({"type": "status", "message": "Loading Gemma-3-4B model..."})
-    log("Loading mlx-community/gemma-3-4b-it-4bit...")
+    log("Loading mlx-community/gemma-3-4b-it-qat-4bit...")
     t0 = time.time()
 
-    model, tokenizer = load("mlx-community/gemma-3-4b-it-4bit")
+    model, tokenizer = load("mlx-community/gemma-3-4b-it-qat-4bit")
     log(f"Model loaded in {time.time() - t0:.1f}s")
 
     # Wrap prompt in Gemma chat format
@@ -273,7 +274,7 @@ def generate_gemma(prompt: str) -> str:
         model,
         tokenizer,
         prompt=gemma_prompt,
-        max_tokens=1024,
+        max_tokens=2048,
         verbose=False,
     )
 

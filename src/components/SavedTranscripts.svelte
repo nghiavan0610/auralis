@@ -34,8 +34,10 @@
 
   let {
     onBack,
+    subscriptionTier = 'free',
   }: {
     onBack: () => void;
+    subscriptionTier?: 'free' | 'pro';
   } = $props();
 
   let transcriptsWithSummaries: (TranscriptMeta & { summaryPreview?: SummaryPreview })[] = $state([]);
@@ -49,6 +51,20 @@
   let summaryStatus = $state('');
   let renaming = $state<string | null>(null);
   let renameValue = $state('');
+  let searchQuery = $state('');
+
+  // Filter transcripts based on search query
+  let filteredTranscripts = $derived(() => {
+    if (!searchQuery.trim()) {
+      return transcriptsWithSummaries;
+    }
+    const query = searchQuery.toLowerCase();
+    return transcriptsWithSummaries.filter(t =>
+      t.filename.toLowerCase().includes(query) ||
+      t.preview.toLowerCase().includes(query) ||
+      formatDate(t.date).toLowerCase().includes(query)
+    );
+  });
 
   const summaryUnlisteners: UnlistenFn[] = [];
 
@@ -193,7 +209,8 @@
     summaryStatus = 'Starting summary generation...';
     try {
       // Rust returns immediately; events handle progress/completion
-      await invoke('generate_summary', { filename, tier: 'free' });
+      // Use the actual subscription tier from props
+      await invoke('generate_summary', { filename, tier: subscriptionTier });
     } catch (err) {
       console.error('Failed to start summary generation:', err);
       summaryStatus = `Failed: ${typeof err === 'string' ? err : err instanceof Error ? err.message : 'Unknown error'}`;
@@ -231,6 +248,112 @@
       selectedFilename = null;
     } else {
       onBack();
+    }
+  }
+
+  async function handleExportTxt() {
+    if (!selectedContent || !selectedFilename) return;
+    try {
+      // Use the existing content as-is for TXT export
+      const blob = new Blob([selectedContent], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = selectedFilename.replace('.txt', '') + '_export.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export TXT:', err);
+    }
+  }
+
+  async function handleExportJson() {
+    if (!selectedContent || !selectedFilename) return;
+    try {
+      // Parse the transcript content into structured JSON
+      const lines = selectedContent.split('\n').filter(line => line.trim());
+      const segments: { timestamp?: string; original?: string; translated?: string; }[] = [];
+
+      for (const line of lines) {
+        const timestampMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+        const langMatch = line.match(/\((\w+)\s*→\s*(\w+)\)/);
+
+        if (timestampMatch || langMatch) {
+          const segment: { timestamp?: string; original?: string; translated?: string; } = {};
+          if (timestampMatch) segment.timestamp = timestampMatch[1];
+          if (langMatch) {
+            // Split by the language pattern and extract original/translated
+            const parts = line.split(/\(\w+\s*→\s*\w+\)/);
+            if (parts.length >= 2) {
+              segment.original = parts[0].replace(/\[\d{2}:\d{2}:\d{2}\]\s*/, '').trim();
+              segment.translated = parts[1].trim();
+            }
+          }
+          segments.push(segment);
+        }
+      }
+
+      const jsonData = {
+        filename: selectedFilename,
+        exportedAt: new Date().toISOString(),
+        segments
+      };
+
+      const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = selectedFilename.replace('.txt', '') + '_export.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export JSON:', err);
+    }
+  }
+
+  async function handleExportCsv() {
+    if (!selectedContent || !selectedFilename) return;
+    try {
+      const lines = selectedContent.split('\n').filter(line => line.trim());
+      const csvRows = ['Timestamp,Original,Translated'];
+
+      for (const line of lines) {
+        const timestampMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+        const langMatch = line.match(/\((\w+)\s*→\s*(\w+)\)/);
+
+        if (timestampMatch || langMatch) {
+          const timestamp = timestampMatch ? timestampMatch[1] : '';
+          const parts = line.split(/\(\w+\s*→\s*\w+\)/);
+          let original = '';
+          let translated = '';
+
+          if (parts.length >= 2) {
+            original = parts[0].replace(/\[\d{2}:\d{2}:\d{2}\]\s*/, '').trim().replace(/"/g, '""');
+            translated = parts[1].trim().replace(/"/g, '""');
+          }
+
+          // Escape CSV values
+          const escapeCsv = (val: string) => `"${val.replace(/"/g, '""')}"`;
+          csvRows.push(`${escapeCsv(timestamp)},${escapeCsv(original)},${escapeCsv(translated)}`);
+        }
+      }
+
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = selectedFilename.replace('.txt', '') + '_export.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export CSV:', err);
     }
   }
 
@@ -290,6 +413,16 @@
           {/if}
         </span>
         <div class="card-actions">
+          <button class="card-btn export-btn" onclick={handleExportTxt} title="Export as TXT" disabled={!selectedContent}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+          <button class="card-btn export-btn" onclick={handleExportJson} title="Export as JSON" disabled={!selectedContent}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </button>
+          <button class="card-btn export-btn" onclick={handleExportCsv} title="Export as CSV" disabled={!selectedContent}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
+          <div class="card-actions-divider"></div>
           <button class="card-btn" onclick={() => selectedFilename && startRename(selectedFilename)} title="Rename">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
           </button>
@@ -310,6 +443,16 @@
           {/if}
         </span>
         <div class="card-actions">
+          <button class="card-btn export-btn" onclick={handleExportTxt} title="Export as TXT" disabled={!selectedContent}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+          <button class="card-btn export-btn" onclick={handleExportJson} title="Export as JSON" disabled={!selectedContent}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </button>
+          <button class="card-btn export-btn" onclick={handleExportCsv} title="Export as CSV" disabled={!selectedContent}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
+          <div class="card-actions-divider"></div>
           <button class="card-btn" onclick={() => selectedFilename && startRename(selectedFilename)} title="Rename">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
           </button>
@@ -464,7 +607,38 @@
     {:else}
       <!-- List view -->
       <div class="transcript-list">
-        {#each transcriptsWithSummaries as t (t.filename)}
+        <!-- Search bar -->
+        <div class="search-bar">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input
+            class="search-input"
+            type="text"
+            placeholder="Search transcripts..."
+            bind:value={searchQuery}
+          />
+          {#if searchQuery}
+            <button class="search-clear" onclick={() => searchQuery = ''} title="Clear search">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          {/if}
+        </div>
+        {#if filteredTranscripts().length === 0}
+          <div class="empty-state">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span>No transcripts match "{searchQuery}"</span>
+          </div>
+        {/if}
+        {#each filteredTranscripts() as t (t.filename)}
           <div class="transcript-card" onclick={() => renaming !== t.filename && handleOpen(t.filename)}>
             <div class="card-header">
               {#if renaming === t.filename}
@@ -610,6 +784,56 @@
     gap: var(--space-sm);
   }
 
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-sm);
+  }
+
+  .search-icon {
+    flex-shrink: 0;
+    color: var(--text-dim);
+  }
+
+  .search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family);
+  }
+
+  .search-input::placeholder {
+    color: var(--text-dim);
+  }
+
+  .search-clear {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .search-clear:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
   .transcript-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -665,6 +889,22 @@
   .card-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  .export-btn {
+    color: var(--accent);
+  }
+
+  .export-btn:hover {
+    background: rgba(99, 140, 255, 0.1);
+    color: var(--accent-hover);
+  }
+
+  .card-actions-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 4px;
   }
 
   .header-rename-btn {

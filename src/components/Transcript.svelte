@@ -8,18 +8,24 @@
     sourceLanguage = 'en',
     targetLanguage = 'vi',
     translationType = 'one_way',
+    mode = 'cloud',
+    audioSource = 'microphone',
     segments = [],
     provisionalText = '',
     provisionalLang = '',
     fontSize = 14,
+    onOpenSettings,
   }: {
     sourceLanguage?: string;
     targetLanguage?: string;
     translationType?: 'one_way' | 'two_way';
+    mode?: 'cloud' | 'offline';
+    audioSource?: 'microphone' | 'system' | 'both';
     segments?: Segment[];
     provisionalText?: string;
     provisionalLang?: string;
     fontSize?: number;
+    onOpenSettings?: () => void;
   } = $props();
 
   let leftContainer: HTMLDivElement | undefined = $state();
@@ -136,7 +142,47 @@
     <!-- LEFT: Original text -->
     <div class="column" bind:this={leftContainer}>
       {#if isEmpty}
-        <div class="empty-state">Listening...</div>
+        <div class="empty-state-enhanced">
+          <div class="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+          <div class="empty-title">Ready to translate</div>
+          <div class="empty-config">
+            <span class="config-badge">{getLangFlag(sourceLanguage)} {getLangLabel(sourceLanguage)}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+            <span class="config-badge">{getLangFlag(targetLanguage)} {getLangLabel(targetLanguage)}</span>
+          </div>
+          <div class="empty-mode">
+            {#if mode === 'cloud'}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+              </svg>
+              Cloud Mode
+            {:else}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+              </svg>
+              Offline Mode
+            {/if}
+          </div>
+          <div class="empty-hint">Click the microphone button to start</div>
+          {#if onOpenSettings}
+            <button class="empty-settings-btn" onclick={onOpenSettings}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              Configure Settings
+            </button>
+          {/if}
+        </div>
       {:else}
         {#each segments as seg, i (seg.id)}
           {#if isTwoWay && seg.detectedLang && shouldShowSpeakerLabel(i)}
@@ -169,7 +215,16 @@
     <!-- RIGHT: Translated text -->
     <div class="column" bind:this={rightContainer}>
       {#if isEmpty}
-        <div class="empty-state">Translation...</div>
+        <div class="empty-state-enhanced empty-state-secondary">
+          <div class="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5">
+              <path d="M5 8l6 6M5 14l6-6"/>
+              <path d="M12.5 3L17 8l-4.5 5M17 8H7"/>
+            </svg>
+          </div>
+          <div class="empty-title">Translation</div>
+          <div class="empty-desc">Translated text will appear here</div>
+        </div>
       {:else}
         {#each segments as seg, i (seg.id)}
           {#if seg.translated}
@@ -276,14 +331,102 @@
     background: var(--border);
   }
 
-  /* --- Empty state --- */
-  .empty-state {
+
+  /* --- Enhanced empty state --- */
+  .empty-state-enhanced {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     height: 100%;
+    padding: var(--space-lg);
+    text-align: center;
+    gap: var(--space-md);
+  }
+
+  .empty-state-secondary .empty-icon {
+    opacity: 0.6;
+  }
+
+  .empty-state-secondary .empty-title {
     color: var(--text-dim);
+  }
+
+  .empty-icon {
+    opacity: 0.4;
+    margin-bottom: var(--space-xs);
+  }
+
+  .empty-title {
+    font-size: var(--font-size-md);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .empty-config {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .config-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: rgba(99, 140, 255, 0.1);
+    border: 1px solid rgba(99, 140, 255, 0.2);
+    border-radius: var(--radius-md);
     font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .empty-mode {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    color: var(--text-dim);
+  }
+
+  .empty-hint {
+    font-size: var(--font-size-sm);
+    color: var(--text-dim);
+  }
+
+  .empty-desc {
+    font-size: var(--font-size-sm);
+    color: var(--text-dim);
+  }
+
+  .empty-settings-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 8px 14px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    z-index: 1;
+    pointer-events: auto;
+  }
+
+  .empty-settings-btn:hover {
+    background: rgba(99, 140, 255, 0.1);
+    border-color: var(--accent);
+    color: var(--text-primary);
   }
 
   /* --- Speaker label (two-way mode) --- */

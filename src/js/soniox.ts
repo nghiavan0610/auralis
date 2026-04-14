@@ -16,13 +16,22 @@
 // Types
 // ---------------------------------------------------------------------------
 
-export type TranslationType = "one_way" | "two_way";
+import type {
+  ConnectionStatus,
+  TranslationType,
+} from './constants';
 
-export type ConnectionStatus =
-  | "connecting"
-  | "connected"
-  | "disconnected"
-  | "error";
+export type { ConnectionStatus, TranslationType } from './constants';
+
+import {
+  WS_CLOSE_NORMAL,
+  SONIOX_ENDPOINT,
+  MAX_RECONNECT_ATTEMPTS,
+  BASE_RECONNECT_DELAY_MS,
+  SESSION_DURATION_MS,
+  KEEPALIVE_INTERVAL_MS,
+  CONTEXT_HISTORY_CHARS,
+} from './constants';
 
 export interface SonioxConfig {
   api_key: string;
@@ -57,24 +66,6 @@ interface SonioxMessage {
   error_code?: number;
   error_message?: string;
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const SONIOX_ENDPOINT = "wss://stt-rt.soniox.com/transcribe-websocket";
-
-const MAX_RECONNECT_ATTEMPTS = 3;
-const BASE_RECONNECT_DELAY_MS = 2000;
-
-/** Full session duration before we perform a seamless reset. */
-const SESSION_DURATION_MS = 3 * 60 * 1000;
-
-/** How often to send a keepalive frame during silence. */
-const KEEPALIVE_INTERVAL_MS = 15_000;
-
-/** Maximum characters of recent translations retained for context carryover. */
-const CONTEXT_HISTORY_CHARS = 500;
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -124,6 +115,12 @@ export class SonioxClient {
   private sessionTimer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
+  // ---- audio backpressure queue -------------------------------------------
+  private audioQueue: Array<ArrayBuffer | Uint8Array> = [];
+  private isProcessingQueue = false;
+  private readonly MAX_QUEUE_SIZE = 10;
+  private droppedFrames = 0;
+
   // ---- context carryover --------------------------------------------------
   private recentTranslations: string[] = [];
 
@@ -159,9 +156,56 @@ export class SonioxClient {
 
   /** Send raw PCM audio data (signed 16-bit little-endian, 16 kHz, mono). */
   sendAudio(pcmData: ArrayBuffer | Uint8Array): void {
+    // Implement backpressure - if queue is full, drop the frame
+    if (this.audioQueue.length >= this.MAX_QUEUE_SIZE) {
+      this.droppedFrames++;
+      // Log warning every 100 dropped frames to avoid spam
+      if (this.droppedFrames % 100 === 1) {
+        console.warn(`[Soniox] Audio queue full, dropped ${this.droppedFrames} frames`);
+      }
+      return;
+    }
+
+    this.audioQueue.push(pcmData);
+    this.processAudioQueue();
+  }
+
+  /** Process audio queue with backpressure */
+  private processAudioQueue(): void {
+    if (this.isProcessingQueue || this.audioQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
     const socket = this.activeSocket();
-    if (socket) {
-      socket.send(pcmData);
+
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      // Clear queue if socket is not ready
+      this.audioQueue = [];
+      this.isProcessingQueue = false;
+      return;
+    }
+
+    const chunk = this.audioQueue.shift();
+    if (chunk) {
+      try {
+        socket.send(chunk);
+        // Reset dropped counter when we successfully send
+        if (this.droppedFrames > 0 && this.audioQueue.length < this.MAX_QUEUE_SIZE / 2) {
+          console.log(`[Soniox] Audio queue recovered, dropped ${this.droppedFrames} total frames`);
+          this.droppedFrames = 0;
+        }
+      } catch (error) {
+        console.error('[Soniox] Failed to send audio:', error);
+      }
+    }
+
+    this.isProcessingQueue = false;
+
+    // Process next chunk if available (but not recursively to avoid stack overflow)
+    if (this.audioQueue.length > 0) {
+      // Use requestAnimationFrame to yield to the browser
+      requestAnimationFrame(() => this.processAudioQueue());
     }
   }
 
@@ -171,27 +215,49 @@ export class SonioxClient {
     this.clearSessionTimer();
     this.clearKeepalive();
 
+    // Clear audio queue
+    this.audioQueue = [];
+    this.isProcessingQueue = false;
+    this.droppedFrames = 0;
+
     const socket = this.activeSocket();
 
     if (socket) {
+      // Mark as retired BEFORE closing to prevent event handlers from firing
+      this.retiredSockets.add(socket);
       try {
         if (socket.readyState === WebSocket.OPEN) {
           // Sending an empty buffer signals graceful end-of-stream to Soniox.
           socket.send(new ArrayBuffer(0));
         }
-        socket.close(1000, "User disconnected");
+        socket.close(WS_CLOSE_NORMAL, "User disconnected");
       } catch {
         // Swallow -- we are tearing down regardless.
       }
+      // Clear event handlers to prevent memory leaks
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onerror = null;
+      socket.onclose = null;
     }
 
     // Also close any pending (mid-reset) socket.
     if (this.pendingWs) {
+      // Mark as retired BEFORE closing
+      this.retiredSockets.add(this.pendingWs);
       try {
+        if (this.pendingWs.readyState === WebSocket.OPEN) {
+          this.pendingWs.send(new ArrayBuffer(0));
+        }
         this.pendingWs.close(1000, "User disconnected");
       } catch {
         // Swallow.
       }
+      // Clear event handlers to prevent memory leaks
+      this.pendingWs.onopen = null;
+      this.pendingWs.onmessage = null;
+      this.pendingWs.onerror = null;
+      this.pendingWs.onclose = null;
       this.pendingWs = null;
     }
 

@@ -14,15 +14,18 @@
     "windows": [
       {
         "title": "Auralis",
-        "width": 600,
-        "height": 400,
-        "minWidth": 400,
-        "minHeight": 200,
+        "width": 1000,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
-        "decorations": false,
+        "decorations": true,
         "transparent": false,
-        "shadow": true
+        "shadow": true,
+        "visible": true,
+        "center": true,
+        "backgroundColor": "#0f0f14"
       }
     ],
     "security": {

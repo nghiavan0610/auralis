@@ -19,14 +19,14 @@ pub use system_audio_stub::SystemAudioCapture;
 
 /// Convert f32 audio samples to PCM s16le bytes.
 pub fn f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8> {
-    samples
-        .iter()
-        .flat_map(|&sample| {
-            let clamped = sample.clamp(-1.0, 1.0);
-            let s16 = (clamped * 32767.0) as i16;
-            s16.to_le_bytes()
-        })
-        .collect()
+    // Pre-allocate with exact capacity (2 bytes per sample)
+    let mut result = Vec::with_capacity(samples.len() * 2);
+    for &sample in samples {
+        let clamped = sample.clamp(-1.0, 1.0);
+        let s16 = (clamped * 32767.0) as i16;
+        result.extend_from_slice(&s16.to_le_bytes());
+    }
+    result
 }
 
 /// Mix two PCM s16le streams by averaging corresponding i16 samples.

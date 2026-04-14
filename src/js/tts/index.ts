@@ -4,6 +4,9 @@
  * Uses the Strategy pattern: each provider implements TTSProviderAdapter.
  * The engine dispatches to the active provider and handles fallback
  * to Web Speech if a cloud provider fails.
+ *
+ * Providers are lazily loaded - only instantiated when first used.
+ * Inactive cloud providers are unloaded after 30 seconds to free resources.
  */
 
 import type { TTSProviderName, TTSVoice, TTSProviderAdapter } from './types';
@@ -12,26 +15,89 @@ import { EdgeTTSProvider } from './edge';
 import { GoogleTTSProvider } from './google';
 import { ElevenLabsTTSProvider } from './elevenlabs';
 
+const PROVIDER_UNLOAD_DELAY_MS = 30000; // 30 seconds
+
 class TTSEngine {
   private _provider: TTSProviderName = 'webspeech';
   private _rate: number = 1.0;
   private _voice: string = '';
 
-  // Cached singleton instances — each provider holds its own audio state
-  // (currentAudio, currentUtterance) so we must reuse the same instance.
-  private providers: Record<TTSProviderName, TTSProviderAdapter>;
+  // Lazy-loaded provider instances
+  private providers: Partial<Record<TTSProviderName, TTSProviderAdapter>> = {};
+
+  // Unload timers for each provider
+  private unloadTimers: Partial<Record<TTSProviderName, ReturnType<typeof setTimeout>>> = {};
 
   constructor() {
-    this.providers = {
-      webspeech: new WebSpeechProvider(),
-      edge: new EdgeTTSProvider(),
-      google: new GoogleTTSProvider(),
-      elevenlabs: new ElevenLabsTTSProvider(),
-    };
+    // Always keep WebSpeech loaded (it's lightweight)
+    this.providers['webspeech'] = new WebSpeechProvider();
+  }
+
+  private getProvider(name: TTSProviderName): TTSProviderAdapter {
+    // Create provider on demand if not exists
+    if (!this.providers[name]) {
+      switch (name) {
+        case 'webspeech':
+          this.providers[name] = new WebSpeechProvider();
+          break;
+        case 'edge':
+          this.providers[name] = new EdgeTTSProvider();
+          break;
+        case 'google':
+          this.providers[name] = new GoogleTTSProvider();
+          break;
+        case 'elevenlabs':
+          this.providers[name] = new ElevenLabsTTSProvider();
+          break;
+      }
+      console.log(`[TTS] Loaded provider: ${name}`);
+    }
+
+    // Clear any existing unload timer
+    if (this.unloadTimers[name]) {
+      clearTimeout(this.unloadTimers[name]);
+      delete this.unloadTimers[name];
+    }
+
+    return this.providers[name]!;
+  }
+
+  private scheduleUnload(providerName: TTSProviderName): void {
+    // Don't unload WebSpeech - it's lightweight and always needed
+    if (providerName === 'webspeech') {
+      return;
+    }
+
+    // Clear existing timer if any
+    if (this.unloadTimers[providerName]) {
+      clearTimeout(this.unloadTimers[providerName]);
+    }
+
+    // Schedule unload after delay
+    this.unloadTimers[providerName] = setTimeout(() => {
+      // Only unload if it's not the current provider
+      if (this._provider !== providerName && this.providers[providerName]) {
+        console.log(`[TTS] Unloading inactive provider: ${providerName}`);
+
+        // Cleanup the provider
+        const provider = this.providers[providerName];
+        if (provider && 'cleanup' in provider) {
+          try {
+            (provider as any).cleanup();
+          } catch (e) {
+            console.warn(`[TTS] Error cleaning up ${providerName}:`, e);
+          }
+        }
+
+        delete this.providers[providerName];
+      }
+
+      delete this.unloadTimers[providerName];
+    }, PROVIDER_UNLOAD_DELAY_MS);
   }
 
   private get active(): TTSProviderAdapter {
-    return this.providers[this._provider];
+    return this.getProvider(this._provider);
   }
 
   /** Speak text aloud. Interrupts any current speech. Falls back to Web Speech on error. */
@@ -45,16 +111,16 @@ class TTSEngine {
     } catch {
       if (this._provider !== 'webspeech') {
         console.warn('[Auralis] TTS provider failed, falling back to Web Speech');
-        await this.providers['webspeech'].speak(text, lang, this._voice, this._rate);
+        await this.providers['webspeech']!.speak(text, lang, this._voice, this._rate);
       }
     }
   }
 
   /** Stop any currently playing speech across all providers. */
   stop(): void {
-    for (const provider of Object.values(this.providers)) {
+    for (const [name, provider] of Object.entries(this.providers)) {
       try {
-        provider.stop();
+        provider?.stop();
       } catch {
         // Best-effort
       }
@@ -68,7 +134,13 @@ class TTSEngine {
 
   /** Set TTS provider. */
   setProvider(provider: TTSProviderName): void {
+    const oldProvider = this._provider;
     this._provider = provider;
+
+    // Schedule unload of old provider if it's a cloud provider
+    if (oldProvider !== 'webspeech' && oldProvider !== provider) {
+      this.scheduleUnload(oldProvider);
+    }
   }
 
   /** Get current provider. */
@@ -94,6 +166,27 @@ class TTSEngine {
   /** Get current voice preference. */
   get voice(): string {
     return this._voice;
+  }
+
+  /** Cleanup all providers (call on app shutdown) */
+  cleanup(): void {
+    // Clear all unload timers
+    for (const timer of Object.values(this.unloadTimers)) {
+      clearTimeout(timer);
+    }
+    this.unloadTimers = {};
+
+    // Cleanup all providers
+    for (const [name, provider] of Object.entries(this.providers)) {
+      if (provider && 'cleanup' in provider) {
+        try {
+          (provider as any).cleanup();
+        } catch (e) {
+          console.warn(`[TTS] Error cleaning up ${name}:`, e);
+        }
+      }
+    }
+    this.providers = { webspeech: this.providers['webspeech']! };
   }
 }
 

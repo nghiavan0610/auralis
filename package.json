@@ -25,8 +25,9 @@
     "vite": "^5.0.0"
   },
   "dependencies": {
+    "@revenuecat/purchases-js": "^1.32.0",
     "@tauri-apps/api": "^2.1.0",
-    "@tauri-apps/plugin-updater": "^2",
-    "@tauri-apps/plugin-process": "^2"
+    "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-updater": "^2"
   }
 }

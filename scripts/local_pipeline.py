@@ -62,6 +62,11 @@ LANG_NAMES = {
     "hi": "Hindi", "it": "Italian", "nl": "Dutch",
 }
 
+# VAD constants
+SILENCE_THRESHOLD = 50  # Lowered from 100 for better sensitivity
+MIN_SPEECH_DURATION = 0.3  # Minimum 300ms of speech
+MAX_SILENCE_DURATION = 1.5  # Cut off after 1.5s of silence
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,6 +80,146 @@ def log(msg):
 def emit(data):
     """Write a JSON object to stdout as a single line and flush."""
     print(json.dumps(data, ensure_ascii=False), flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Hybrid VAD (Voice Activity Detection)
+# ---------------------------------------------------------------------------
+
+class HybridVAD:
+    """
+    Hybrid Voice Activity Detection combining multiple features:
+    - RMS energy (loudness)
+    - Zero-crossing rate (fricative detection)
+    - Spectral centroid (voiced/unvoiced distinction)
+    """
+
+    def __init__(self):
+        self.rms_threshold = SILENCE_THRESHOLD
+        self.energy_history = []
+        self.history_size = 100
+
+    def _compute_rms(self, pcm_bytes: bytes) -> float:
+        """Compute root-mean-square energy."""
+        if len(pcm_bytes) % 2 != 0:
+            pcm_bytes = pcm_bytes[:-1]
+        if len(pcm_bytes) == 0:
+            return 0.0
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+        return float(np.sqrt(np.mean(samples ** 2)))
+
+    def _compute_zero_crossing_rate(self, pcm_bytes: bytes) -> float:
+        """Compute zero-crossing rate (high for fricatives like 's', 'f')."""
+        if len(pcm_bytes) % 2 != 0:
+            pcm_bytes = pcm_bytes[:-1]
+        if len(pcm_bytes) < 4:
+            return 0.0
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+        # Count sign changes
+        crossings = np.sum(np.abs(np.diff(np.signbit(samples.astype(np.int16)))))
+        return float(crossings) / len(samples)
+
+    def _compute_spectral_centroid(self, pcm_bytes: bytes) -> float:
+        """Compute spectral centroid (higher for voiced speech)."""
+        if len(pcm_bytes) % 2 != 0:
+            pcm_bytes = pcm_bytes[:-1]
+        if len(pcm_bytes) < 4:
+            return 0.0
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+
+        # Compute magnitude spectrum using FFT
+        spectrum = np.abs(np.fft.rfft(samples))
+        # Normalize by total energy
+        total_energy = np.sum(spectrum) + 1e-10  # Avoid division by zero
+        # Weight frequencies by magnitude
+        freqs = np.fft.rfftfreq(len(samples), d=1.0/SAMPLE_RATE)
+        centroid = np.sum(freqs * spectrum) / total_energy
+        return float(centroid)
+
+    def is_speech(self, pcm_bytes: bytes) -> bool:
+        """
+        Determine if audio chunk contains speech using hybrid features.
+
+        Returns:
+            True if speech is detected, False otherwise
+        """
+        rms = self._compute_rms(pcm_bytes)
+        zcr = self._compute_zero_crossing_rate(pcm_bytes)
+        spectral_centroid = self._compute_spectral_centroid(pcm_bytes)
+
+        # Adaptive threshold based on recent history
+        if len(self.energy_history) > 10:
+            self.rms_threshold = np.percentile(self.energy_history, 30)
+
+        self.energy_history.append(rms)
+        if len(self.energy_history) > self.history_size:
+            self.energy_history.pop(0)
+
+        # Combined decision using weighted features
+        # RMS energy is most important (50%)
+        energy_score = min(1.0, rms / (self.rms_threshold * 2)) if rms > self.rms_threshold else 0
+
+        # Zero-crossing rate helps detect fricatives (30%)
+        zcr_score = min(1.0, zcr / 0.15) if zcr > 0.05 else 0
+
+        # Spectral centroid helps distinguish voiced speech (20%)
+        centroid_score = min(1.0, spectral_centroid / 1500) if spectral_centroid > 500 else 0
+
+        # Combined score
+        combined_score = (energy_score * 0.5 +
+                         zcr_score * 0.3 +
+                         centroid_score * 0.2)
+
+        return combined_score > 0.4  # Threshold for speech detection
+
+
+# ---------------------------------------------------------------------------
+# Translation Cache (LRU)
+# ---------------------------------------------------------------------------
+
+class TranslationCache:
+    """Simple LRU cache for translations to avoid redundant LLM calls."""
+
+    def __init__(self, max_size=1000):
+        self.cache = {}
+        self.max_size = max_size
+        self.access_order = []
+
+    def get(self, text, target_lang):
+        """Get cached translation if available."""
+        key = f"{text}:{target_lang}"
+        if key in self.cache:
+            # Update access order
+            self.access_order.remove(key)
+            self.access_order.append(key)
+            return self.cache[key]
+        return None
+
+    def set(self, text, target_lang, translation):
+        """Cache a translation."""
+        key = f"{text}:{target_lang}"
+
+        # Remove oldest if at capacity
+        if len(self.cache) >= self.max_size and key not in self.cache:
+            oldest = self.access_order.pop(0)
+            del self.cache[oldest]
+
+        self.cache[key] = translation
+        if key not in self.access_order:
+            self.access_order.append(key)
+
+    def clear(self):
+        """Clear the cache."""
+        self.cache.clear()
+        self.access_order.clear()
+
+    def stats(self):
+        """Return cache statistics."""
+        return {
+            "size": len(self.cache),
+            "max_size": self.max_size,
+            "utilization": len(self.cache) / self.max_size * 100
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +259,12 @@ class LocalPipeline:
         # Rolling context for translation continuity
         self.context_history = []  # list of (original, translated) tuples
         self.max_context = 5
+
+        # Translation cache to avoid redundant LLM calls
+        self.translation_cache = TranslationCache(max_size=1000)
+
+        # Hybrid VAD for better speech detection
+        self.vad = HybridVAD()
 
         # Model references (populated during loading)
         self.whisper_repo: str | None = None
@@ -247,6 +398,12 @@ class LocalPipeline:
             return ""
 
         target = target_lang or self.target_lang
+
+        # Check cache first to avoid redundant LLM calls
+        cached = self.translation_cache.get(text, target)
+        if cached is not None:
+            return cached
+
         target_name = LANG_NAMES.get(target, target)
         source_name = LANG_NAMES.get(self.source_lang, self.source_lang)
 
@@ -274,11 +431,15 @@ class LocalPipeline:
             "<start_of_turn>model\n"
         )
 
+        # Dynamic token allocation based on input length (min 200, max 512)
+        input_tokens = len(text.split())
+        max_tokens = min(512, max(200, input_tokens * 2))
+
         result = generate(
             self.llm_model,
             self.llm_tokenizer,
             prompt=prompt,
-            max_tokens=100,
+            max_tokens=max_tokens,
         )
 
         # Post-process: clean up LLM output
@@ -294,6 +455,9 @@ class LocalPipeline:
             self.context_history.append((text, result))
             if len(self.context_history) > self.max_context * 2:
                 self.context_history = self.context_history[-self.max_context:]
+
+            # Cache the translation for future use
+            self.translation_cache.set(text, target, result)
 
         return result
 
@@ -406,8 +570,8 @@ class LocalPipeline:
 
     def _process_chunk(self, pcm_bytes: bytes) -> None:
         """Transcribe one chunk, translate new text, and emit a single result."""
-        rms = self._compute_rms(pcm_bytes)
-        if rms < SILENCE_THRESHOLD:
+        # Use hybrid VAD for better speech detection
+        if not self.vad.is_speech(pcm_bytes):
             return
 
         t_start = time.time()

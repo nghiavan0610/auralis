@@ -3,6 +3,11 @@
 //! This module provides the application state and settings
 //! for the dual-mode (cloud/offline) streaming architecture.
 
+use crate::constants::{
+    default_audio_source, default_endpoint_delay, default_font_size, default_max_lines,
+    default_opacity, default_subscription_tier, default_tts_enabled, default_tts_provider,
+    default_tts_rate, default_translation_type,
+};
 use serde::{Deserialize, Serialize};
 use std::process::{Child, ChildStdin};
 use std::sync::Arc;
@@ -56,15 +61,6 @@ pub struct Settings {
     /// ElevenLabs API key
     #[serde(default)]
     pub elevenlabs_api_key: String,
-    /// Summary provider: "auto", "gemma", "claude", or "gpt"
-    #[serde(default = "default_summary_provider")]
-    pub summary_provider: String,
-    /// Anthropic API key for Claude summaries
-    #[serde(default)]
-    pub claude_api_key: String,
-    /// OpenAI API key for GPT summaries
-    #[serde(default)]
-    pub openai_api_key: String,
     /// Subscription tier: "free" or "pro"
     #[serde(default = "default_subscription_tier")]
     pub subscription_tier: String,
@@ -74,50 +70,6 @@ pub struct Settings {
     /// Last month when summary count was reset (YYYY-MM format)
     #[serde(default)]
     pub last_summary_reset: String,
-}
-
-fn default_translation_type() -> String {
-    "one_way".to_string()
-}
-
-fn default_audio_source() -> String {
-    "microphone".to_string()
-}
-
-fn default_opacity() -> f64 {
-    0.88
-}
-
-fn default_font_size() -> u32 {
-    14
-}
-
-fn default_max_lines() -> u32 {
-    100
-}
-
-fn default_endpoint_delay() -> f64 {
-    1.0
-}
-
-fn default_tts_enabled() -> bool {
-    false
-}
-
-fn default_tts_rate() -> f64 {
-    1.0
-}
-
-fn default_tts_provider() -> String {
-    "webspeech".to_string()
-}
-
-fn default_summary_provider() -> String {
-    "gemma".to_string()
-}
-
-fn default_subscription_tier() -> String {
-    "free".to_string()
 }
 
 impl Default for Settings {
@@ -139,9 +91,6 @@ impl Default for Settings {
             tts_provider: default_tts_provider(),
             google_api_key: String::new(),
             elevenlabs_api_key: String::new(),
-            summary_provider: default_summary_provider(),
-            claude_api_key: String::new(),
-            openai_api_key: String::new(),
             subscription_tier: default_subscription_tier(),
             summaries_this_month: 0,
             last_summary_reset: String::new(),
