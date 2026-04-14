@@ -68,6 +68,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VITE_REVENUECAT_PUBLIC_KEY: ${{ secrets.REVENUECAT_PUBLIC_KEY }}
+          AURALIS_OPENAI_API_KEY: ${{ secrets.AURALIS_OPENAI_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Auralis ${{ github.ref_name }}'
@@ -105,6 +106,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           VITE_REVENUECAT_PUBLIC_KEY: ${{ secrets.REVENUECAT_PUBLIC_KEY }}
+          AURALIS_OPENAI_API_KEY: ${{ secrets.AURALIS_OPENAI_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Auralis ${{ github.ref_name }}'
