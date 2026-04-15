@@ -209,3 +209,88 @@ export function clampEndpointDelay(value: number): number {
 export function clampTtsRate(value: number): number {
   return Math.max(MIN_TTS_RATE, Math.min(MAX_TTS_RATE, value));
 }
+
+// ---------------------------------------------------------------------------
+// Confidence Constants
+// ----------------------------------------------------------------------------
+
+/**
+ * Confidence thresholds for categorizing detection/translation quality
+ * Values are in the 0-1 range as typically returned by STT APIs
+ */
+export const CONFIDENCE_THRESHOLD_HIGH = 0.85; // >= 85% is considered high confidence
+export const CONFIDENCE_THRESHOLD_MEDIUM = 0.65; // >= 65% is medium confidence
+export const CONFIDENCE_THRESHOLD_LOW = 0.0; // Below 65% is low confidence
+
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
+
+export const ConfidenceLevel = {
+  HIGH: 'high',
+  MEDIUM: 'medium',
+  LOW: 'low',
+} as const;
+
+export type ConfidenceLevel = typeof ConfidenceLevel[keyof typeof ConfidenceLevel];
+
+/**
+ * Map a numerical confidence score (0-1) to a categorical confidence level
+ *
+ * @param score Confidence score between 0 and 1
+ * @returns Categorical confidence level ('high', 'medium', or 'low')
+ */
+export function mapConfidenceToLevel(score: number | undefined | null): ConfidenceLevel {
+  // Handle missing or invalid confidence scores
+  if (typeof score !== 'number' || isNaN(score)) {
+    return 'medium'; // Default to medium for missing data
+  }
+
+  // Clamp score to valid range
+  const clampedScore = Math.max(0, Math.min(1, score));
+
+  if (clampedScore >= CONFIDENCE_THRESHOLD_HIGH) {
+    return 'high';
+  } else if (clampedScore >= CONFIDENCE_THRESHOLD_MEDIUM) {
+    return 'medium';
+  } else {
+    return 'low';
+  }
+}
+
+/**
+ * Validate if a confidence score is within the valid range
+ *
+ * @param score Confidence score to validate
+ * @returns true if the score is valid
+ */
+export function isValidConfidenceScore(score: number): boolean {
+  return typeof score === 'number' &&
+         !isNaN(score) &&
+         score >= 0 &&
+         score <= 1;
+}
+
+/**
+ * Smooth confidence scores using exponential moving average
+ * Useful for reducing jitter in real-time confidence updates
+ *
+ * @param currentScore Current confidence score
+ * @param previousScore Previous smoothed confidence score (or undefined for first value)
+ * @param alpha Smoothing factor (0-1). Lower = more smoothing. Default: 0.3
+ * @returns Smoothed confidence score
+ */
+export function smoothConfidenceScore(
+  currentScore: number,
+  previousScore: number | undefined,
+  alpha: number = 0.3
+): number {
+  if (!isValidConfidenceScore(currentScore)) {
+    return previousScore ?? 0.5; // Default to middle if invalid
+  }
+
+  if (previousScore === undefined || !isValidConfidenceScore(previousScore)) {
+    return currentScore; // No previous value, return current as-is
+  }
+
+  // Exponential moving average: smoothed = alpha * current + (1 - alpha) * previous
+  return alpha * currentScore + (1 - alpha) * previousScore;
+}

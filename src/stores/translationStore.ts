@@ -7,6 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { AudioSource, OperatingMode, TranslationType } from '../js/constants';
+import type { ConfidenceFilterLevel } from '../js/confidenceFilter';
 
 export interface TranslationSettings {
   mode: OperatingMode;
@@ -15,6 +16,7 @@ export interface TranslationSettings {
   translationType: TranslationType;
   audioSource: AudioSource;
   endpointDelay: number;
+  confidenceFilterLevel: ConfidenceFilterLevel;
 }
 
 const DEFAULT_SETTINGS: TranslationSettings = {
@@ -24,6 +26,7 @@ const DEFAULT_SETTINGS: TranslationSettings = {
   translationType: 'one_way' as TranslationType,
   audioSource: 'microphone' as AudioSource,
   endpointDelay: 1.0,
+  confidenceFilterLevel: 'low',
 };
 
 let currentSettings: TranslationSettings = { ...DEFAULT_SETTINGS };
@@ -99,6 +102,7 @@ async function persistSettings(): Promise<void> {
         translation_type: currentSettings.translationType,
         audio_source: currentSettings.audioSource,
         endpoint_delay: currentSettings.endpointDelay,
+        confidence_filter_level: currentSettings.confidenceFilterLevel,
       },
     });
   } catch (err) {
@@ -118,6 +122,7 @@ export async function loadTranslationSettings(): Promise<void> {
       translation_type?: string;
       audio_source?: string;
       endpoint_delay?: number;
+      confidence_filter_level?: string;
     }>('load_settings');
 
     currentSettings = {
@@ -127,6 +132,7 @@ export async function loadTranslationSettings(): Promise<void> {
       translationType: (settings.translation_type ?? DEFAULT_SETTINGS.translationType) as TranslationType,
       audioSource: (settings.audio_source ?? DEFAULT_SETTINGS.audioSource) as AudioSource,
       endpointDelay: settings.endpoint_delay ?? DEFAULT_SETTINGS.endpointDelay,
+      confidenceFilterLevel: (settings.confidence_filter_level ?? DEFAULT_SETTINGS.confidenceFilterLevel) as ConfidenceFilterLevel,
     };
 
     notifyListeners();

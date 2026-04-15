@@ -4,10 +4,14 @@ export type OperatingMode = 'cloud' | 'offline';
 export type TranslationType = 'one_way' | 'two_way';
 export type AudioSource = 'microphone' | 'system' | 'both';
 
-/** Language auto-detection state for one-way translation */
+/** Language auto-detection state for one-way and two-way translation */
 export interface DetectionState {
   status: 'idle' | 'detecting' | 'detected' | 'uncertain' | 'error';
   detectedLanguage?: string;
+  /** Active speaker in two-way mode (1 = source language, 2 = target language) */
+  activeSpeaker?: 1 | 2;
+  /** Detection confidence level */
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 /** A paired original + translation segment */
@@ -21,4 +25,6 @@ export interface Segment {
   targetLang: string;
   status: 'pending' | 'provisional' | 'translated';
   timestamp: number;
+  /** Detection confidence level (for two-way mode) */
+  confidence?: 'high' | 'medium' | 'low';
 }

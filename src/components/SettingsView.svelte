@@ -2,8 +2,8 @@
   import ModelDownloader from './ModelDownloader.svelte';
   import TabNavigation from './TabNavigation.svelte';
   import Tooltip from './Tooltip.svelte';
-  import Button from './Button.svelte';
   import LanguageSelectorWithAutoDetect from './LanguageSelectorWithAutoDetect.svelte';
+  import ConfidenceSettings from './ConfidenceSettings.svelte';
   import type { OperatingMode, TranslationType, AudioSource } from '../types';
   import { getLangLabel, SUPPORTED_LANGUAGES } from '../js/lang';
   import { tts } from '../js/tts';
@@ -20,6 +20,7 @@
     type PurchaseError
   } from '../js/revenuecat';
   import { getTabIcon } from '../js/tabIcons';
+  import { confidenceStore, type ConfidenceSettings as ConfidenceSettingsType } from '../stores/confidenceStore';
 
   interface PlatformInfo {
     os: string;
@@ -51,6 +52,7 @@
     offlineSetupStep = $bindable(''),
     offlineReady = $bindable(false),
     initialTab = 'translation',
+    confidenceFilterLevel = 'low' as 'none' | 'low' | 'medium',
     onSave,
     onBack,
   }: {
@@ -77,6 +79,7 @@
     offlineSetupStep?: string;
     offlineReady?: boolean;
     initialTab?: 'translation' | 'display' | 'tts' | 'subscription' | 'about';
+    confidenceFilterLevel?: 'none' | 'low' | 'medium';
     onSave: (settings: {
       mode: OperatingMode;
       soniox_api_key: string;
@@ -94,6 +97,7 @@
       tts_provider: 'webspeech' | 'edge' | 'google' | 'elevenlabs';
       google_api_key: string;
       elevenlabs_api_key: string;
+      confidence_filter_level: 'none' | 'low' | 'medium';
     }) => void;
     onBack: () => void;
   } = $props();
@@ -125,6 +129,15 @@
   let localElevenlabsApiKey = $state('');
   let localClaudeApiKey = $state('');
   let localOpenaiApiKey = $state('');
+  let localConfidenceFilterLevel: 'none' | 'low' | 'medium' = $state('low');
+  let localConfidenceSettings: ConfidenceSettingsType = $state({
+    filterLevel: 'none',
+    highThreshold: 0.85,
+    mediumThreshold: 0.70,
+    lowThreshold: 0.50,
+    showConfidenceScores: false,
+    perLanguageOverrides: {}
+  });
 
   let voiceDropdownOpen = $state(false);
   let modeDropdownOpen = $state(false);
@@ -184,6 +197,8 @@
     localTtsProvider = ttsProvider;
     localGoogleApiKey = googleApiKey;
     localElevenlabsApiKey = elevenlabsApiKey;
+    localConfidenceFilterLevel = confidenceFilterLevel;
+    localConfidenceSettings = confidenceStore.get();
   });
 
   // Load version and check for updates when About tab is opened
@@ -297,6 +312,7 @@
       tts_provider: localTtsProvider,
       google_api_key: localGoogleApiKey,
       elevenlabs_api_key: localElevenlabsApiKey,
+      confidence_filter_level: localConfidenceFilterLevel,
     });
   }
 
@@ -704,7 +720,7 @@
     </button>
     <span class="settings-title" data-tauri-drag-region>Settings</span>
     <div style="flex:1" data-tauri-drag-region></div>
-    <Button onclick={handleSave} disabled={isTranslating}>Save</Button>
+    <button class="settings-save-btn" onclick={handleSave} disabled={isTranslating}>Save</button>
   </div>
 
   <!-- Tab Navigation -->
@@ -957,6 +973,25 @@
             style="--fill: {((localEndpointTenths - 5) / 25) * 100}%"
           />
         </div>
+
+        <!-- Confidence Filter card -->
+        <div class="section-label" style="margin-top: 24px;">Quality Filter</div>
+        <p class="section-desc">Automatically hide low-confidence translations to improve quality. Adaptive filtering disables if too many segments are filtered.</p>
+        <ConfidenceSettings
+          settings={localConfidenceSettings}
+          disabled={isTranslating}
+          onChange={(newSettings) => {
+            localConfidenceSettings = newSettings;
+            confidenceStore.updateMany(newSettings);
+            // Also update the legacy filterLevel for backward compatibility
+            localConfidenceFilterLevel = newSettings.filterLevel === 'high' ? 'medium' : newSettings.filterLevel;
+          }}
+          onReset={() => {
+            confidenceStore.reset();
+            localConfidenceSettings = confidenceStore.get();
+            localConfidenceFilterLevel = 'low';
+          }}
+        />
       </div>
 
     {:else if activeTab === 'display'}
@@ -2048,6 +2083,36 @@
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--text-primary);
+  }
+
+  .settings-save-btn {
+    height: 32px;
+    padding: 0 16px;
+    background: linear-gradient(135deg, var(--accent) 0%, #5a7fd4 100%);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(99, 140, 255, 0.4);
+  }
+
+  .settings-save-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--accent-hover) 0%, #6b8ae8 100%);
+    box-shadow: 0 3px 12px rgba(99, 140, 255, 0.5);
+    transform: translateY(-1px);
+  }
+
+  .settings-save-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .settings-save-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Tabs — pill style */

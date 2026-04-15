@@ -23,20 +23,16 @@
   let {
     variant = 'secondary',
     size = 'md',
-    icon = null,
-    iconPosition = 'left',
     loading = false,
     disabled = false,
     onclick,
     type = 'button',
     title = '',
     fullWidth = false,
-    children = null
+    children
   }: {
-    variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'icon';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
     size?: 'sm' | 'md' | 'lg';
-    icon?: Snippet;
-    iconPosition?: 'left' | 'right';
     loading?: boolean;
     disabled?: boolean;
     onclick?: () => void;
@@ -59,8 +55,6 @@
   class="btn"
   class:variant={variant}
   class:size={size}
-  class:with-icon={icon}
-  class:icon-right={iconPosition === 'right'}
   class:loading={loading}
   class:disabled={disabled || loading}
   class:full-width={fullWidth}
@@ -71,23 +65,7 @@
   {#if loading}
     <span class="btn-spinner" aria-hidden="true"></span>
   {:else}
-    {#if icon && iconPosition === 'left'}
-      <span class="btn-icon btn-icon-left">
-        {@render icon()}
-      </span>
-    {/if}
-
-    {#if children}
-      <span class="btn-content">
-        {@render children()}
-      </span>
-    {/if}
-
-    {#if icon && iconPosition === 'right'}
-      <span class="btn-icon btn-icon-right">
-        {@render icon()}
-      </span>
-    {/if}
+    {@render children?.()}
   {/if}
 </button>
 

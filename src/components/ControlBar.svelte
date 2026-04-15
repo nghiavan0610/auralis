@@ -5,6 +5,7 @@
   import { onDestroy } from 'svelte';
   import Tooltip from './Tooltip.svelte';
   import AutoDetectIndicator from './AutoDetectIndicator.svelte';
+  import QuickConfidenceFilter from './QuickConfidenceFilter.svelte';
 
   interface PlatformInfo {
     os: string;
@@ -163,15 +164,17 @@
         </button>
       </Tooltip>
     {/if}
-    <button class="bar-btn gear-btn" onclick={onOpenSettings} title="Settings (⌘,)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-      </svg>
-      {#if updateAvailable}
-        <span class="update-badge"></span>
-      {/if}
-    </button>
+    <Tooltip content="Settings (⌘,)" position="bottom">
+      <button class="bar-btn gear-btn" onclick={onOpenSettings}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        {#if updateAvailable}
+          <span class="update-badge"></span>
+        {/if}
+      </button>
+    </Tooltip>
     <span class="status-dot" style="background: {statusColor()}"></span>
     <span class="status-text" data-tauri-drag-region>{statusText}</span>
     {#if translationType === 'one_way'}
@@ -183,15 +186,39 @@
         onClick={() => onShowLanguageSelector ? onShowLanguageSelector() : onOpenSettings()}
       />
     {:else}
-      <Tooltip content={`${getLangLabel(sourceLanguage)} ↔ ${getLangLabel(targetLanguage)} (Click to change)`}>
-        <div class="lang-indicator" onclick={() => onShowLanguageSelector ? onShowLanguageSelector() : onOpenSettings()}>
-          <span class="lang-flag">{getLangFlag(sourceLanguage)}</span>
+      <!-- Two-way: Dynamic speaker detection display -->
+      <div class="two-way-detect-indicator"
+           class:detecting={detectionState.status === 'detecting'}
+           onclick={() => onShowLanguageSelector ? onShowLanguageSelector() : onOpenSettings()}
+           role="button"
+           aria-label="Language pair: {getLangLabel(sourceLanguage)} and {getLangLabel(targetLanguage)}">
+
+        <div class="speaker-indicator speaker-1"
+             class:active={detectionState.activeSpeaker === 1}
+             class:detecting={detectionState.status === 'detecting' && detectionState.activeSpeaker === 1}>
+          <span class="speaker-flag">{getLangFlag(sourceLanguage)}</span>
+          <span class="speaker-label">{getLangLabel(sourceLanguage)}</span>
+          {#if detectionState.activeSpeaker === 1 && detectionState.status === 'detecting'}
+            <span class="detecting-pulse"></span>
+          {/if}
+        </div>
+
+        <div class="speaker-divider">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
             <path d="M5 12h14M12 5l7 7-7 7"/>
           </svg>
-          <span class="lang-flag">{getLangFlag(targetLanguage)}</span>
         </div>
-      </Tooltip>
+
+        <div class="speaker-indicator speaker-2"
+             class:active={detectionState.activeSpeaker === 2}
+             class:detecting={detectionState.status === 'detecting' && detectionState.activeSpeaker === 2}>
+          <span class="speaker-flag">{getLangFlag(targetLanguage)}</span>
+          <span class="speaker-label">{getLangLabel(targetLanguage)}</span>
+          {#if detectionState.activeSpeaker === 2 && detectionState.status === 'detecting'}
+            <span class="detecting-pulse"></span>
+          {/if}
+        </div>
+      </div>
     {/if}
     <Tooltip content={mode === 'cloud' ? 'Cloud mode (Click to change)' : 'Offline mode (Click to change)'}>
       <div class="mode-indicator" class:cloud={mode === 'cloud'} class:offline={mode === 'offline'} onclick={() => onShowModeSelector ? onShowModeSelector() : onOpenSettings()}>
@@ -308,6 +335,8 @@
         </button>
       </Tooltip>
 
+      <QuickConfidenceFilter />
+
       <Tooltip content="Clear current transcript" position="top">
         <button class="bar-btn" onclick={onClear}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -327,15 +356,15 @@
         </div>
       </Tooltip>
     {/if}
-    <Tooltip content={isPinned ? 'Unpin from top' : 'Pin to top'} position="left">
-      <button class="bar-btn" class:active={isPinned} onclick={onTogglePin}>
-      <svg viewBox="0 0 24 24" fill={isPinned ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 17v5"/>
-        <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76z"/>
-      </svg>
+    <Tooltip content={isPinned ? 'Unpin from top' : 'Pin to top'} position="top">
+      <button class="bar-btn bar-btn-pin" class:active={isPinned} onclick={onTogglePin}>
+        <svg viewBox="0 0 24 24" fill={isPinned ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 17v5"/>
+          <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76z"/>
+        </svg>
       </button>
     </Tooltip>
-    <Tooltip content="Minimize window" position="left">
+    <Tooltip content="Minimize window" position="top">
       <button class="bar-btn" onclick={handleMinimize}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
@@ -777,5 +806,85 @@
   .bar-btn:last-child:hover {
     color: var(--danger);
     background: rgba(255, 77, 77, 0.1);
+  }
+
+  /* Two-way detection indicator */
+  .two-way-detect-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .two-way-detect-indicator:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .speaker-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 3px 6px;
+    border-radius: var(--radius-sm);
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .speaker-indicator.active {
+    background: rgba(99, 140, 255, 0.15);
+  }
+
+  .speaker-indicator.detecting {
+    animation: speaker-pulse 1.5s ease-in-out infinite;
+  }
+
+  .speaker-flag {
+    font-size: 11px;
+  }
+
+  .speaker-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+
+  .detecting-pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse-dot 1s ease-in-out infinite;
+  }
+
+  .speaker-divider {
+    color: var(--text-dim);
+    opacity: 0.6;
+  }
+
+  @keyframes speaker-pulse {
+    0%, 100% {
+      background: rgba(99, 140, 255, 0.1);
+    }
+    50% {
+      background: rgba(99, 140, 255, 0.2);
+    }
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% {
+      opacity: 0.3;
+      transform: scale(0.8);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
+    }
   }
 </style>

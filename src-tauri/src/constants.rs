@@ -361,3 +361,34 @@ pub fn default_tts_provider() -> String {
 pub fn default_subscription_tier() -> String {
     SubscriptionTier::Free.as_str().to_string()
 }
+
+/// Confidence filter level
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfidenceFilterLevel {
+    None,
+    Low,
+    Medium,
+}
+
+impl ConfidenceFilterLevel {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Low => "low",
+            Self::Medium => "medium",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "none" => Some(Self::None),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            _ => None,
+        }
+    }
+}
+
+pub fn default_confidence_filter_level() -> String {
+    ConfidenceFilterLevel::Low.as_str().to_string()
+}

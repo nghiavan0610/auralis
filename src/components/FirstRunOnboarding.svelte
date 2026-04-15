@@ -1,6 +1,4 @@
 <script lang="ts">
-  import Button from './Button.svelte';
-
   let {
     show = false,
     onFinish,
@@ -109,14 +107,14 @@
       </div>
 
       <div class="onboarding-footer">
-        <Button variant="ghost" size="sm" onclick={skip}>Skip Tour</Button>
+        <button class="onboarding-btn onboarding-btn-ghost" onclick={skip}>Skip Tour</button>
         <div class="footer-actions">
           {#if currentStep > 0}
-            <Button variant="secondary" size="sm" onclick={prevStep}>Back</Button>
+            <button class="onboarding-btn onboarding-btn-secondary" onclick={prevStep}>Back</button>
           {/if}
-          <Button variant="primary" size="sm" onclick={nextStep}>
+          <button class="onboarding-btn onboarding-btn-primary" onclick={nextStep}>
             {currentStep === steps.length - 1 ? 'Get Started' : 'Next'}
-          </Button>
+          </button>
         </div>
       </div>
     </div>
@@ -222,5 +220,51 @@
   .footer-actions {
     display: flex;
     gap: var(--space-sm);
+  }
+
+  .onboarding-btn {
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .onboarding-btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+  }
+
+  .onboarding-btn-ghost:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .onboarding-btn-secondary {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .onboarding-btn-secondary:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+  }
+
+  .onboarding-btn-primary {
+    background: linear-gradient(135deg, var(--accent) 0%, #5a7fd4 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(99, 140, 255, 0.4);
+  }
+
+  .onboarding-btn-primary:hover {
+    background: linear-gradient(135deg, var(--accent-hover) 0%, #6b8ae8 100%);
+    box-shadow: 0 3px 12px rgba(99, 140, 255, 0.5);
+    transform: translateY(-1px);
   }
 </style>

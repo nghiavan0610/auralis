@@ -41,7 +41,7 @@ export interface SonioxConfig {
   endpoint_delay?: number;
 
   /** Called when finalized original-language text is received. */
-  onOriginal: (text: string, is_final: boolean, language?: string) => void;
+  onOriginal: (text: string, is_final: boolean, language?: string, confidence?: number) => void;
   /** Called when finalized translated text is received. */
   onTranslation: (text: string, is_final: boolean) => void;
   /** Called whenever the connection status changes. */
@@ -489,6 +489,10 @@ export class SonioxClient {
     let hasEndpoint = false;
     let detectedLanguage: string | undefined;
 
+    // Confidence tracking for original text
+    let originalConfidenceScores: number[] = [];
+    let provisionalConfidenceScores: number[] = [];
+
     for (const token of data.tokens) {
       // Special endpoint marker.
       if (token.text === "<end>") {
@@ -505,8 +509,16 @@ export class SonioxClient {
         case "original":
           if (token.is_final) {
             originalText += token.text;
+            // Collect confidence scores for final tokens
+            if (token.confidence !== undefined && token.confidence !== null) {
+              originalConfidenceScores.push(token.confidence);
+            }
           } else {
             provisionalOriginal += token.text;
+            // Collect confidence scores for provisional tokens
+            if (token.confidence !== undefined && token.confidence !== null) {
+              provisionalConfidenceScores.push(token.confidence);
+            }
           }
           break;
 
@@ -521,21 +533,29 @@ export class SonioxClient {
           // Surface it as untranslated original text.
           if (token.is_final) {
             originalText += token.text;
+            if (token.confidence !== undefined && token.confidence !== null) {
+              originalConfidenceScores.push(token.confidence);
+            }
           } else {
             provisionalOriginal += token.text;
+            if (token.confidence !== undefined && token.confidence !== null) {
+              provisionalConfidenceScores.push(token.confidence);
+            }
           }
           break;
       }
     }
 
-    // Emit finalized original text with detected language.
+    // Emit finalized original text with detected language and aggregated confidence
     if (originalText.trim()) {
-      this.config.onOriginal(originalText, true, detectedLanguage);
+      const avgConfidence = this.aggregateConfidence(originalConfidenceScores);
+      this.config.onOriginal(originalText, true, detectedLanguage, avgConfidence);
     }
 
-    // Emit provisional original text with detected language.
+    // Emit provisional original text with detected language and aggregated confidence
     if (provisionalOriginal.trim()) {
-      this.config.onOriginal(provisionalOriginal, false, detectedLanguage);
+      const avgConfidence = this.aggregateConfidence(provisionalConfidenceScores);
+      this.config.onOriginal(provisionalOriginal, false, detectedLanguage, avgConfidence);
     }
 
     // Emit finalized translation text + store for carryover.
@@ -553,6 +573,46 @@ export class SonioxClient {
     ) {
       this.config.onOriginal("", false);
     }
+  }
+
+  /**
+   * Aggregate confidence scores from multiple tokens into a single representative value.
+   * Uses weighted average favoring more recent tokens and applies smoothing.
+   *
+   * @param scores Array of confidence scores (0-1 range)
+   * @returns Aggregated confidence score or undefined if no valid scores
+   */
+  private aggregateConfidence(scores: number[]): number | undefined {
+    if (scores.length === 0) {
+      return undefined; // No confidence data available
+    }
+
+    // Filter out invalid scores (NaN, undefined, null, out of range)
+    const validScores = scores.filter(
+      score => typeof score === 'number' &&
+               !isNaN(score) &&
+               score >= 0 &&
+               score <= 1
+    );
+
+    if (validScores.length === 0) {
+      return undefined; // No valid confidence scores
+    }
+
+    // Use weighted average favoring recent tokens (last 30% get 2x weight)
+    const weight = validScores.length > 3 ? 0.3 : 0; // Only apply if we have enough tokens
+    const splitIndex = Math.floor(validScores.length * (1 - weight));
+
+    let weightedSum = 0;
+    let totalWeight = 0;
+
+    for (let i = 0; i < validScores.length; i++) {
+      const tokenWeight = i >= splitIndex ? 2 : 1;
+      weightedSum += validScores[i] * tokenWeight;
+      totalWeight += tokenWeight;
+    }
+
+    return weightedSum / totalWeight;
   }
 
   // =========================================================================

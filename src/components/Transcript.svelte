@@ -3,6 +3,7 @@
   import { onDestroy } from 'svelte';
   import type { Segment } from '../types';
   import { getLangLabel, getLangFlag } from '../js/lang';
+  import ConversationBubble from './ConversationBubble.svelte';
 
   let {
     sourceLanguage = 'en',
@@ -90,6 +91,21 @@
     return prev.detectedLang !== curr.detectedLang;
   }
 
+  // Helper for two-way mode to get speaker info
+  function getSpeakerInfo(seg: Segment): {
+    number: number;
+    confidence?: 'high' | 'medium' | 'low';
+  } {
+    if (seg.detectedLang === sourceLanguage) {
+      return { number: 1, confidence: seg.confidence };
+    }
+    if (seg.detectedLang === targetLanguage) {
+      return { number: 2, confidence: seg.confidence };
+    }
+    return { number: 1 };
+  }
+
+  // Helper to determine which speaker the provisional text belongs to
   const isEmpty = $derived(segments.length === 0 && !provisionalText);
   const isTwoWay = $derived(translationType === 'two_way');
 
@@ -100,8 +116,84 @@
 </script>
 
 <div class="transcript" style="--entry-font-size: {fontSize}px">
-  <!-- Column headers -->
-  <div class="panel-headers">
+  {#if isTwoWay}
+    <!-- Two-way mode: Conversation bubble layout -->
+    <div class="conversation-view">
+      {#if isEmpty}
+        <div class="empty-state-enhanced">
+          <div class="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+          <div class="empty-title">Ready to translate</div>
+          <div class="empty-config">
+            <span class="config-badge">{getLangFlag(sourceLanguage)} Speaker 1</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+            <span class="config-badge">{getLangFlag(targetLanguage)} Speaker 2</span>
+          </div>
+          <div class="empty-mode">
+            {#if mode === 'cloud'}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+              </svg>
+              Cloud Mode
+            {:else}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+              </svg>
+              Offline Mode
+            {/if}
+          </div>
+          <div class="empty-hint">Click the microphone button to start</div>
+          {#if onOpenSettings}
+            <button class="empty-settings-btn" onclick={onOpenSettings}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              Configure Settings
+            </button>
+          {/if}
+        </div>
+      {:else}
+        <!-- Conversation bubbles for two-way mode -->
+        {#each segments as seg, i (seg.id)}
+          {@const speakerInfo = getSpeakerInfo(seg)}
+          <ConversationBubble
+            segment={seg}
+            speakerNumber={speakerInfo.number}
+            {sourceLanguage}
+            {targetLanguage}
+            showTranslation={true}
+            {fontSize}
+          />
+        {/each}
+
+        <!-- Provisional text bubble -->
+        {#if provisionalText}
+          {@const provisionalSpeakerNumber = provisionalLang === sourceLanguage ? 1 : 2}
+          <ConversationBubble
+            provisionalText={provisionalText}
+            provisionalLang={provisionalLang}
+            speakerNumber={provisionalSpeakerNumber}
+            {sourceLanguage}
+            {targetLanguage}
+            showTranslation={false}
+            {fontSize}
+          />
+        {/if}
+      {/if}
+    </div>
+  {:else}
+    <!-- One-way mode: Existing two-column layout -->
+    <!-- Column headers -->
+    <div class="panel-headers">
     <div class="panel-header">
       <span class="header-flag">{getLangFlag(sourceLanguage)}</span>
       <span class="header-lang">{getLangLabel(sourceLanguage)}</span>
@@ -243,6 +335,7 @@
       {/if}
     </div>
   </div>
+  {/if}
 </div>
 
 <style>
@@ -530,5 +623,15 @@
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(2px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* --- Conversation View (Two-Way Mode) --- */
+  .conversation-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-md) var(--space-sm);
+    overflow-y: auto;
+    gap: var(--space-md);
   }
 </style>

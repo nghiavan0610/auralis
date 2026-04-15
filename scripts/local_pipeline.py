@@ -361,8 +361,13 @@ class LocalPipeline:
                 return True
         return False
 
-    def _transcribe(self, pcm_bytes: bytes) -> tuple[str, str]:
-        """Transcribe PCM s16le bytes directly using MLX Whisper."""
+    def _transcribe(self, pcm_bytes: bytes) -> tuple[str, str, float | None]:
+        """Transcribe PCM s16le bytes directly using MLX Whisper.
+
+        Returns:
+            Tuple of (transcribed_text, detected_language, confidence_score)
+            confidence_score is None if not available from the model
+        """
         import mlx_whisper
 
         audio_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / INT16_MAX
@@ -382,7 +387,37 @@ class LocalPipeline:
         text = result.get("text", "").strip()
         detected_lang = result.get("language", self.source_lang)
 
-        return text, detected_lang
+        # Extract confidence if available (Whisper models may provide different metrics)
+        confidence = None
+        if "avg_logprob" in result:
+            # Convert average log probability to confidence score (0-1 range)
+            # Log probabilities are typically negative, map -2.5 to 0.0 and -0.5 to 1.0
+            logprob = result["avg_logprob"]
+            # Clamp and normalize to 0-1 range
+            normalized = max(-2.5, min(-0.5, logprob))
+            confidence = (normalized + 2.5) / 2.0  # Maps -2.5->0.0, -0.5->1.0
+        elif "compression_ratio" in result:
+            # Use compression ratio as a proxy for confidence
+            # Lower compression ratio (closer to 1.0) typically indicates more confident transcription
+            cr = result["compression_ratio"]
+            # Map compression ratio to confidence: 1.0 -> 1.0, 2.5+ -> 0.0
+            confidence = max(0.0, 1.0 - (cr - 1.0) / 1.5)
+
+        # If no confidence metrics available, estimate based on text characteristics
+        if confidence is None and text:
+            # Heuristic: longer transcriptions with varied vocabulary tend to be more confident
+            words = text.split()
+            if len(words) >= 4:
+                # Check for repetitive patterns (hallucinations)
+                unique_words = set(word.lower() for word in words)
+                diversity_ratio = len(unique_words) / len(words)
+                # Higher diversity ratio = higher confidence
+                confidence = min(1.0, diversity_ratio * 1.2)  # Scale slightly
+            else:
+                # Very short transcriptions: use medium confidence
+                confidence = 0.75
+
+        return text, detected_lang, confidence
 
     # ------------------------------------------------------------------
     # Translation (Gemma-3 LLM with rolling context)
@@ -578,7 +613,7 @@ class LocalPipeline:
 
         # Step 1: Transcribe
         t1 = time.time()
-        transcript, detected_lang = self._transcribe(pcm_bytes)
+        transcript, detected_lang, confidence = self._transcribe(pcm_bytes)
         t_asr = time.time() - t1
 
         if not transcript or transcript == self.prev_transcript:
@@ -607,13 +642,20 @@ class LocalPipeline:
         else:
             target_lang = self.target_lang
 
-        # Emit original text immediately so the UI shows it right away
-        emit({
+        # Prepare emission payload with confidence
+        original_payload = {
             "type": "original",
             "text": new_text,
             "source_lang": detected_lang,
             "target_lang": target_lang,
-        })
+        }
+
+        # Add confidence if available
+        if confidence is not None:
+            original_payload["confidence"] = round(confidence, 3)  # Round to 3 decimal places
+
+        # Emit original text immediately so the UI shows it right away
+        emit(original_payload)
 
         # Step 3: Translate
         t2 = time.time()
@@ -624,7 +666,7 @@ class LocalPipeline:
         log(f"ASR={t_asr:.2f}s Translate={t_translate:.2f}s total={total:.2f}s")
 
         # Step 4: Emit combined result with translation (replaces pending segment)
-        emit({
+        result_payload = {
             "type": "result",
             "original": new_text,
             "translated": translated,
@@ -635,7 +677,13 @@ class LocalPipeline:
                 "translate": round(t_translate, 2),
                 "total": round(total, 2),
             },
-        })
+        }
+
+        # Add confidence if available
+        if confidence is not None:
+            result_payload["confidence"] = round(confidence, 3)
+
+        emit(result_payload)
 
         if translated:
             self.prev_translation = translated

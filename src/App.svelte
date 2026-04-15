@@ -22,6 +22,18 @@
     loadSubscriptionStatus,
     loadApiKeys
   } from './stores';
+  import {
+    mapConfidenceToLevel,
+    smoothConfidenceScore,
+    type ConfidenceLevel
+  } from './js/constants';
+  import {
+    ConfidenceFilter,
+    formatFilterStats,
+    getFilterLevelLabel,
+    type ConfidenceFilterStats,
+    type FilterDecision
+  } from './js/confidenceFilter';
 
   // Platform info from Rust backend
   interface PlatformInfo {
@@ -76,13 +88,35 @@
   let errorMessage = $state('');
   let sonioxConnectionStatus: ConnectionStatus | null = $state(null);
 
-  // Auto-detection state for one-way translation
+  // Auto-detection state for one-way and two-way translation
   let detectionState = $state<{
     status: 'idle' | 'detecting' | 'detected' | 'uncertain' | 'error';
     detectedLanguage?: string;
+    activeSpeaker?: 1 | 2;  // For two-way mode: track which speaker is talking
+    confidence?: 'high' | 'medium' | 'low';  // Detection confidence level
   }>({
     status: 'idle'
   });
+
+  // Debouncing state to prevent race conditions during rapid speaker switching
+  let detectionSequence = $state(0);
+  let pendingDetectionState = $state<{
+    status: 'idle' | 'detecting' | 'detected';
+    detectedLanguage?: string;
+    activeSpeaker?: 1 | 2;
+    confidence?: 'high' | 'medium' | 'low';
+    sequence: number;
+  } | null>(null);
+  let detectionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Confidence smoothing state (for both cloud and offline modes)
+  let smoothedConfidence: number | undefined = undefined;
+  const CONFIDENCE_SMOOTHING_ALPHA = 0.3; // 30% weight to new values, 70% to history
+
+  // Confidence filtering
+  let confidenceFilter = $state(new ConfidenceFilter());
+  let filterStats = $derived(confidenceFilter.getStats());
+  let lastFilterDecision: FilterDecision | null = $state(null);
 
   // Segment-based transcript model
   let segments: Segment[] = $state([]);
@@ -139,6 +173,11 @@
     tts.setRate(ttsSettings.rate);
   });
 
+  // Sync confidence filter with translation settings
+  $effect(() => {
+    confidenceFilter.updateConfig({ level: translationSettings.confidenceFilterLevel });
+  });
+
   // Soniox client instance
   let sonioxClient: SonioxClient | null = null;
 
@@ -172,6 +211,46 @@
   // Computed helpers
   // ---------------------------------------------------------------------------
 
+  // Helper function to update detection state with debouncing (prevents race conditions)
+  function updateDetectionState(newState: {
+    status: 'idle' | 'detecting' | 'detected';
+    detectedLanguage?: string;
+    activeSpeaker?: 1 | 2;
+    confidence?: 'high' | 'medium' | 'low';
+  }, immediate: boolean = false): void {
+    // For immediate updates (one-way mode, provisional state), apply directly
+    if (immediate) {
+      detectionState = newState;
+      return;
+    }
+
+    // For two-way mode final detections, use debouncing
+    const currentSequence = ++detectionSequence;
+
+    pendingDetectionState = {
+      ...newState,
+      sequence: currentSequence
+    };
+
+    // Clear existing timer
+    if (detectionDebounceTimer) {
+      clearTimeout(detectionDebounceTimer);
+    }
+
+    // Apply state after debounce period (50ms - fast enough to feel responsive)
+    detectionDebounceTimer = setTimeout(() => {
+      // Only apply if this is still the latest update
+      if (pendingDetectionState?.sequence === currentSequence) {
+        detectionState = {
+          status: pendingDetectionState.status,
+          detectedLanguage: pendingDetectionState.detectedLanguage,
+          activeSpeaker: pendingDetectionState.activeSpeaker,
+          confidence: pendingDetectionState.confidence
+        };
+      }
+    }, 50);
+  }
+
   function getStatusType(): 'idle' | 'recording' | 'error' | 'ready' {
     if (errorMessage) return 'error';
     if (isTranslating) return 'recording';
@@ -196,16 +275,46 @@
     return statusMessage;
   }
 
+  function getFilterStatusText(): string {
+    if (confidenceFilter.isAdaptiveDisabled()) {
+      return 'Filter disabled (adaptive)';
+    }
+    if (translationSettings.confidenceFilterLevel === 'none') {
+      return 'No filtering';
+    }
+    const stats = filterStats;
+    if (stats.totalSegments === 0) {
+      return `Filter: ${getFilterLevelLabel(translationSettings.confidenceFilterLevel)}`;
+    }
+    return `Filter: ${formatFilterStats(stats)}`;
+  }
+
   // ---------------------------------------------------------------------------
   // Segment helpers
   // ---------------------------------------------------------------------------
 
-  function addSegment(original: string, detectedLang: string, targetLang: string): void {
+  function addSegment(original: string, detectedLang: string, targetLang: string, confidence?: ConfidenceLevel): void {
     // Filter out segments in unexpected languages
     if (translationSettings.translationType === 'two_way') {
       if (detectedLang !== translationSettings.sourceLanguage && detectedLang !== translationSettings.targetLanguage) return;
     }
     // One-way mode: accept any detected language (auto-detection enabled)
+
+    // Apply confidence filtering
+    const segmentConfidence = confidence ?? 'medium';
+    const filterDecision = confidenceFilter.shouldFilterSegment(segmentConfidence);
+    lastFilterDecision = filterDecision;
+
+    // Log filtering for debugging
+    if (filterDecision.shouldFilter) {
+      console.log(`[ConfidenceFilter] Segment filtered: ${filterDecision.reason}`, {
+        confidence: segmentConfidence,
+        text: original.substring(0, 50) + (original.length > 50 ? '...' : ''),
+        stats: filterStats,
+      });
+      return; // Don't add the segment
+    }
+
     segmentIdCounter++;
     segments.push({
       id: segmentIdCounter,
@@ -215,6 +324,7 @@
       targetLang,
       status: 'pending',
       timestamp: Date.now(),
+      confidence: segmentConfidence,
     });
     if (segments.length > displaySettings.maxLines) {
       segments.splice(0, segments.length - displaySettings.maxLines);
@@ -296,38 +406,77 @@
       target_language: translationSettings.targetLanguage,
       translation_type: translationSettings.translationType,
       endpoint_delay: translationSettings.endpointDelay,
-      onOriginal: (text: string, is_final: boolean, language?: string) => {
+      onOriginal: (text: string, is_final: boolean, language?: string, confidence?: number) => {
         if (is_final && text.trim()) {
           const detectedLang = language ?? translationSettings.sourceLanguage;
-          // Update detection state for one-way mode
-          if (translationSettings.translationType === 'one_way' && language) {
-            detectionState = {
-              status: 'detected',
-              detectedLanguage: language
-              // Note: Confidence not provided by Soniox API, omitting field
-            };
+
+          // Smooth and map confidence score
+          smoothedConfidence = smoothConfidenceScore(
+            confidence ?? 0.85, // Default to high confidence if not provided
+            smoothedConfidence,
+            CONFIDENCE_SMOOTHING_ALPHA
+          );
+          const confidenceLevel = mapConfidenceToLevel(smoothedConfidence);
+
+          // Update detection state for both one-way and two-way modes
+          if (language && isTranslating) {
+            if (translationSettings.translationType === 'one_way') {
+              updateDetectionState({
+                status: 'detected',
+                detectedLanguage: language,
+                confidence: confidenceLevel
+              }, true);  // immediate for one-way
+            } else {
+              // Two-way mode: track active speaker with debouncing
+              const speaker = detectedLang === translationSettings.sourceLanguage ? 1 : 2;
+              updateDetectionState({
+                status: 'detected',
+                detectedLanguage: language,
+                activeSpeaker: speaker,
+                confidence: confidenceLevel
+              }, false);  // debounced for two-way
+            }
           }
           // Determine target lang: in two-way, it's the "other" language
           const target = translationSettings.translationType === 'two_way'
             ? (detectedLang === translationSettings.sourceLanguage ? translationSettings.targetLanguage : translationSettings.sourceLanguage)
             : translationSettings.targetLanguage;
-          addSegment(text, detectedLang, target);
+          addSegment(text, detectedLang, target, confidenceLevel);
           provisionalText = '';
           provisionalLang = '';
         } else if (!is_final) {
           provisionalText = text;
           provisionalLang = language ?? '';
-          // Update to detecting state during provisional transcription
-          if (translationSettings.translationType === 'one_way' && isTranslating) {
-            detectionState = { status: 'detecting' };
+
+          // For provisional text, use raw confidence (less smoothing for real-time updates)
+          const provisionalConfidence = confidence ?? 0.85;
+          const confidenceLevel = mapConfidenceToLevel(provisionalConfidence);
+
+          // Update to detecting state for both modes (immediate for provisional)
+          if (isTranslating) {
+            if (translationSettings.translationType === 'one_way') {
+              updateDetectionState({
+                status: 'detecting',
+                confidence: confidenceLevel
+              }, true);
+            } else if (language) {
+              // Two-way mode: show which speaker is being detected
+              const speaker = language === translationSettings.sourceLanguage ? 1 : 2;
+              updateDetectionState({
+                status: 'detecting',
+                detectedLanguage: language,
+                activeSpeaker: speaker,
+                confidence: confidenceLevel
+              }, true);  // immediate for provisional (transient state)
+            }
           }
         } else {
           // Empty final = clear provisional
           provisionalText = '';
           provisionalLang = '';
-          // Reset to idle when endpoint detected
-          if (translationSettings.translationType === 'one_way') {
-            detectionState = { status: 'idle' };
+          // Reset to idle when endpoint detected (immediate)
+          if (isTranslating) {
+            updateDetectionState({ status: 'idle' }, true);
           }
         }
       },
@@ -420,6 +569,13 @@
       // Stop any playing TTS
       tts.stop();
 
+      // Clean up debounce timer
+      if (detectionDebounceTimer) {
+        clearTimeout(detectionDebounceTimer);
+        detectionDebounceTimer = null;
+      }
+      pendingDetectionState = null;
+
       if (translationSettings.mode === 'cloud') {
         stopCloudMode();
         await invoke<string>('stop_audio_capture');
@@ -473,6 +629,7 @@
     summary_provider: string;
     claude_api_key: string;
     openai_api_key: string;
+    confidence_filter_level: 'none' | 'low' | 'medium';
   }) {
     translationSettings.mode = settings.mode;
     subscriptionStore.update('apiKey', settings.soniox_api_key);
@@ -490,6 +647,7 @@
     ttsSettings.voice = settings.tts_voice;
     ttsSettings.rate = settings.tts_rate;
     ttsSettings.provider = settings.tts_provider;
+    translationSettings.confidenceFilterLevel = settings.confidence_filter_level;
     await saveSettingsImmediately();
     currentView = 'main';
   }
@@ -653,15 +811,36 @@
           if (text) {
             const detectedLang = data.source_lang ?? translationSettings.sourceLanguage;
             const target = data.target_lang ?? translationSettings.targetLanguage;
-            // Update detection state for one-way mode
-            if (translationSettings.translationType === 'one_way' && data.source_lang) {
-              detectionState = {
-                status: 'detected',
-                detectedLanguage: data.source_lang
-                // Note: Confidence not provided by Whisper MLX, omitting field
-              };
+
+            // Extract and process confidence from offline pipeline
+            const rawConfidence = data.confidence ?? 0.85; // Default to high if not provided
+            smoothedConfidence = smoothConfidenceScore(
+              rawConfidence,
+              smoothedConfidence,
+              CONFIDENCE_SMOOTHING_ALPHA
+            );
+            const confidenceLevel = mapConfidenceToLevel(smoothedConfidence);
+
+            // Update detection state for both one-way and two-way modes
+            if (data.source_lang && isTranslating) {
+              if (translationSettings.translationType === 'one_way') {
+                updateDetectionState({
+                  status: 'detected',
+                  detectedLanguage: data.source_lang,
+                  confidence: confidenceLevel
+                }, true);  // immediate for one-way
+              } else {
+                // Two-way mode: track active speaker with debouncing
+                const speaker = detectedLang === translationSettings.sourceLanguage ? 1 : 2;
+                updateDetectionState({
+                  status: 'detected',
+                  detectedLanguage: data.source_lang,
+                  activeSpeaker: speaker,
+                  confidence: confidenceLevel
+                }, false);  // debounced for two-way
+              }
             }
-            addSegment(text, detectedLang, target);
+            addSegment(text, detectedLang, target, confidenceLevel);
           }
         } else if (data.type === 'result') {
           // Full result with translation — update the matching pending segment in place
@@ -669,6 +848,10 @@
           const translated = (data.translated ?? '').trim();
           const detectedLang = data.source_lang ?? translationSettings.sourceLanguage;
           const target = data.target_lang ?? translationSettings.targetLanguage;
+
+          // Extract confidence from result if available
+          const rawConfidence = data.confidence ?? 0.85;
+          const confidenceLevel = mapConfidenceToLevel(rawConfidence);
 
           if (original && translated) {
             // Find the pending segment that matches this original text and update it
@@ -679,6 +862,10 @@
               segments[pendingIdx].translated = translated;
               segments[pendingIdx].status = 'translated';
               segments[pendingIdx].targetLang = target;
+              // Update confidence if not already set or if new confidence is higher
+              if (!segments[pendingIdx].confidence || confidenceLevel === 'high') {
+                segments[pendingIdx].confidence = confidenceLevel;
+              }
               segments = segments;
             } else {
               // No matching pending segment — add as translated
@@ -691,6 +878,7 @@
                 targetLang: target,
                 status: 'translated',
                 timestamp: Date.now(),
+                confidence: confidenceLevel,
               });
               if (segments.length > displaySettings.maxLines) {
                 segments.splice(0, segments.length - displaySettings.maxLines);
@@ -796,6 +984,7 @@
       unlisten();
     }
     if (errorTimer) clearTimeout(errorTimer);
+    if (detectionDebounceTimer) clearTimeout(detectionDebounceTimer);
 
     // Unsubscribe from stores
     unsubscribeTranslation();
@@ -905,7 +1094,9 @@
     tier={subscriptionState.tier}
     apiKey={subscriptionState.apiKey}
     platformInfo={platformInfo}
+    confidenceFilterLevel={translationSettings.confidenceFilterLevel}
     onBack={handleSettingsBack}
+    onSave={handleSettingsSave}
   />
 {:else}
   <SavedTranscripts

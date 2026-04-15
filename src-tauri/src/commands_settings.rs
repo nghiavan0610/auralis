@@ -53,6 +53,68 @@ pub async fn get_settings(
     Ok(settings)
 }
 
+/// Alias for get_settings for compatibility with frontend stores
+#[tauri::command]
+pub async fn load_settings(
+    state: State<'_, AuralisState>,
+) -> Result<Settings, String> {
+    get_settings(state).await
+}
+
+/// Load confidence settings from disk
+#[tauri::command]
+pub async fn load_confidence_settings() -> Result<serde_json::Value, String> {
+    let path = settings_path()?;
+
+    if !path.exists() {
+        return Ok(serde_json::json!({
+            "filter_level": "none",
+            "high_threshold": 0.85,
+            "medium_threshold": 0.70,
+            "low_threshold": 0.50,
+            "show_confidence_scores": false,
+            "per_language_overrides": {}
+        }));
+    }
+
+    let contents = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read settings file: {}", e))?;
+    let settings: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse settings JSON: {}", e))?;
+
+    Ok(serde_json::json!({
+        "filter_level": settings.get("confidence_filter_level").unwrap_or(&serde_json::json!("none")),
+        "high_threshold": 0.85,
+        "medium_threshold": 0.70,
+        "low_threshold": 0.50,
+        "show_confidence_scores": false,
+        "per_language_overrides": {}
+    }))
+}
+
+/// Save confidence settings to disk
+#[tauri::command]
+pub async fn save_confidence_settings(
+    state: State<'_, AuralisState>,
+    settings: serde_json::Value,
+) -> Result<(), String> {
+    // Get current settings
+    let mut current_settings = state.settings.lock().await.clone();
+
+    // Update confidence filter level
+    if let Some(filter_level) = settings.get("filter_level") {
+        if let Some(level) = filter_level.as_str() {
+            current_settings.confidence_filter_level = level.to_string();
+        }
+    }
+
+    // Save all settings
+    drop(state.settings.lock().await);
+    save_settings(state, current_settings).await?;
+
+    Ok(())
+}
+
 /// Save settings to disk and update in-memory state.
 ///
 /// Creates the `~/.config/auralis/` directory if it does not exist.

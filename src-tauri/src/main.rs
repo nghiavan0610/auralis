@@ -69,7 +69,10 @@ fn main() {
             stop_audio_capture,
             // Settings
             get_settings,
+            load_settings,
             save_settings,
+            save_confidence_settings,
+            load_confidence_settings,
             // Offline pipeline
             preload_pipeline,
             start_local_pipeline,

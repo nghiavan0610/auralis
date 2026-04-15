@@ -4,9 +4,9 @@
 //! for the dual-mode (cloud/offline) streaming architecture.
 
 use crate::constants::{
-    default_audio_source, default_endpoint_delay, default_font_size, default_max_lines,
-    default_opacity, default_subscription_tier, default_tts_enabled, default_tts_provider,
-    default_tts_rate, default_translation_type,
+    default_audio_source, default_confidence_filter_level, default_endpoint_delay, default_font_size,
+    default_max_lines, default_opacity, default_subscription_tier, default_tts_enabled,
+    default_tts_provider, default_tts_rate, default_translation_type,
 };
 use serde::{Deserialize, Serialize};
 use std::process::{Child, ChildStdin};
@@ -70,6 +70,9 @@ pub struct Settings {
     /// Last month when summary count was reset (YYYY-MM format)
     #[serde(default)]
     pub last_summary_reset: String,
+    /// Confidence filter level: "none", "low", or "medium"
+    #[serde(default = "default_confidence_filter_level")]
+    pub confidence_filter_level: String,
 }
 
 impl Default for Settings {
@@ -94,6 +97,7 @@ impl Default for Settings {
             subscription_tier: default_subscription_tier(),
             summaries_this_month: 0,
             last_summary_reset: String::new(),
+            confidence_filter_level: default_confidence_filter_level(),
         }
     }
 }

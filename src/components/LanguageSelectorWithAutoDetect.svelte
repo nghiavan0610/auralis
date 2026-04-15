@@ -134,7 +134,7 @@
           <path d="M12 16v-4M12 8h.01"/>
         </svg>
         <span>
-          Automatically detects any spoken language and translates to <strong>{getLangLabel(targetLanguage)}</strong>
+          Automatically detects any spoken language and translates to <strong>{getLangLabel(localTarget)}</strong>
         </span>
       </div>
     {:else}
@@ -145,7 +145,7 @@
           <line x1="3" y1="12" x2="21" y2="12"/>
         </svg>
         <span>
-          Auto-detects between <strong>{getLangLabel(sourceLanguage)}</strong> and <strong>{getLangLabel(targetLanguage)}</strong>
+          Auto-detects between <strong>{getLangLabel(localSource)}</strong> and <strong>{getLangLabel(localTarget)}</strong>
         </span>
       </div>
     {/if}
