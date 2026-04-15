@@ -1,12 +1,16 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   let {
     content = '',
     position = 'top',
-    delay = 200
+    delay = 200,
+    children
   }: {
     content: string;
     position?: 'top' | 'bottom' | 'left' | 'right';
     delay?: number;
+    children?: Snippet;
   } = $props();
 
   let visible = $state(false);
@@ -82,7 +86,7 @@
 </script>
 
 <div class="tooltip-wrapper" onmouseenter={show} onmouseleave={hide} bind:this={triggerEl}>
-  <slot />
+  {@render children?.()}
 
   {#if visible}
     <div

@@ -13,18 +13,22 @@
 -->
 
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   let {
     show = false,
     title = '',
     onClose,
     closeOnBackdropClick = true,
-    closeOnEscape = true
+    closeOnEscape = true,
+    children
   }: {
     show: boolean;
     title: string;
     onClose?: () => void;
     closeOnBackdropClick?: boolean;
     closeOnEscape?: boolean;
+    children?: Snippet;
   } = $props();
 
   // Handle backdrop click
@@ -78,7 +82,7 @@
       </div>
 
       <div class="modal-content">
-        <slot />
+        {@render children?.()}
       </div>
     </div>
   </div>

@@ -156,7 +156,7 @@
   <div class="bar-section">
     {#if onShowShortcuts}
       <Tooltip content="Keyboard shortcuts (?)" position="bottom">
-        <button class="bar-btn shortcuts-btn" onclick={onShowShortcuts}>
+        <button class="bar-btn shortcuts-btn" onclick={onShowShortcuts} aria-label="Keyboard shortcuts">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="2" y="4" width="20" height="16" rx="2"/>
             <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M10 14h.01M14 14h.01M18 14h.01"/>
@@ -327,7 +327,7 @@
       </Tooltip>
 
       <Tooltip content="View saved transcripts" position="top">
-        <button class="bar-btn" onclick={onOpenSaved}>
+        <button class="bar-btn" onclick={onOpenSaved} aria-label="View saved transcripts">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
           <polyline points="12 6 12 12 16 14"/>
@@ -338,7 +338,7 @@
       <QuickConfidenceFilter />
 
       <Tooltip content="Clear current transcript" position="top">
-        <button class="bar-btn" onclick={onClear}>
+        <button class="bar-btn" onclick={onClear} aria-label="Clear current transcript">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6"/>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
