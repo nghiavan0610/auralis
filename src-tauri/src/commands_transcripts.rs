@@ -324,7 +324,7 @@ pub async fn generate_summary(
     app: AppHandle,
     state: State<'_, AuralisState>,
     filename: String,
-    tier: String,
+    _tier: String,
 ) -> Result<(), String> {
     // Validate transcript exists
     let transcript_path = safe_path(&filename)?;
@@ -464,7 +464,6 @@ pub async fn generate_summary(
     // Stdout reader thread
     let app_stdout = app.clone();
     let filename_owned = filename.clone();
-    let settings_arc = state.settings.clone();
     std::thread::spawn(move || {
         let reader = std::io::BufReader::new(stdout);
         for line in reader.lines() {

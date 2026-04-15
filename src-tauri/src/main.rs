@@ -29,8 +29,10 @@ use commands_google_tts::*;
 use commands_elevenlabs_tts::*;
 use commands_transcripts::*;
 
-// Import Manager trait for window access
+// These are used in debug devserver redirect
+#[allow(dead_code)]
 use tauri::Manager;
+#[allow(dead_code)]
 use url::Url;
 
 fn main() {
